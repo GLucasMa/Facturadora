@@ -1,0 +1,164 @@
+<div class="encabezado-pagina">
+  <div>
+    <h1>
+      @if (soloLectura) { {{ modalidad === 'arca' ? 'Factura ' + tipo : 'Comprobante' }} {{ numero }} } @else if (id) { Continuar borrador } @else { Nuevo comprobante }
+    </h1>
+    <p class="subtitulo">
+      @if (soloLectura) { Ya fue emitido y no se puede modificar. } @else { Completá los datos a tu ritmo: podés guardar y seguir después. }
+    </p>
+  </div>
+  <a class="boton boton-secundario" routerLink="/comprobantes">← Volver</a>
+</div>
+
+@if (error) {
+  <div class="aviso aviso-error">{{ error }}</div>
+}
+@if (exito) {
+  <div class="aviso aviso-exito">{{ exito }}</div>
+}
+@if (!soloLectura && emisor === null) {
+  <div class="aviso aviso-info">
+    Para poder emitir, primero completá los datos de tu negocio en
+    <a routerLink="/configuracion">Mi negocio</a>.
+  </div>
+}
+
+@if (cargando) {
+  <p class="vacio">Cargando...</p>
+} @else {
+  <fieldset class="sin-borde" [disabled]="soloLectura || trabajando">
+    <section class="tarjeta">
+      <h2>1. ¿Qué tipo de comprobante querés hacer?</h2>
+      <div class="opciones">
+        <label class="opcion" [class.elegida]="modalidad === 'arca'">
+          <input type="radio" name="modalidad" value="arca" [(ngModel)]="modalidad" />
+          <strong>Factura electrónica (ARCA)</strong>
+          <span>Válida fiscalmente. Se envía a ARCA y recibe su CAE.</span>
+        </label>
+        <label class="opcion" [class.elegida]="modalidad === 'no_fiscal'">
+          <input type="radio" name="modalidad" value="no_fiscal" [(ngModel)]="modalidad" />
+          <strong>Comprobante no fiscal</strong>
+          <span>No se informa a ARCA. Sale con la leyenda “Documento no válido como factura”.</span>
+        </label>
+      </div>
+
+      @if (modalidad === 'arca') {
+        <h3 class="subtitulo-seccion">Tipo de factura</h3>
+        <div class="tipos">
+          @for (t of tipos; track t) {
+            <label class="tipo" [class.elegida]="tipo === t" [class.deshabilitada]="!permitido(t)">
+              <input type="radio" name="tipo" [value]="t" [(ngModel)]="tipo" [disabled]="!permitido(t)" />
+              Factura {{ t }}
+            </label>
+          }
+        </div>
+        @if (emisor) {
+          <p class="ayuda-tipo">
+            Con tu condición frente al IVA (<strong>{{ textoCondicion }}</strong>) podés emitir: {{ textoTiposPermitidos }}.
+            Podés cambiarla en <a routerLink="/configuracion">Mi negocio</a>.
+          </p>
+        }
+      }
+    </section>
+
+    <section class="tarjeta">
+      <h2>2. Cliente y datos generales</h2>
+      <div class="grilla">
+        <label class="campo">
+          Cliente
+          <select name="cliente" [(ngModel)]="clienteId">
+            <option [ngValue]="null" disabled>Elegí un cliente</option>
+            @for (c of clientes; track c.id) {
+              <option [ngValue]="c.id">{{ c.nombre }}</option>
+            }
+          </select>
+          @if (!soloLectura) {
+            <small>¿No está? <a routerLink="/clientes">Cargalo en Clientes</a> y volvé.</small>
+          }
+        </label>
+        <label class="campo">
+          Fecha
+          <input type="date" name="fecha" [(ngModel)]="fecha" />
+        </label>
+        <label class="campo">
+          Condición de venta
+          <input type="text" name="condicion" [(ngModel)]="condicionVenta" placeholder="Contado, Transferencia..." />
+        </label>
+        @if (modalidad === 'arca') {
+          <label class="campo">
+            Corresponde a
+            <select name="concepto" [(ngModel)]="concepto">
+              <option value="servicios">Servicios</option>
+              <option value="productos">Productos</option>
+            </select>
+          </label>
+        }
+      </div>
+    </section>
+
+    <section class="tarjeta">
+      <h2>3. Detalle</h2>
+      <div class="scroll-x">
+        <table class="tabla items">
+          <thead>
+            <tr>
+              <th>Descripción</th>
+              <th class="num">Cantidad</th>
+              <th class="num">Precio unitario</th>
+              <th class="der">Subtotal</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (item of items; track $index) {
+              <tr>
+                <td><input type="text" [name]="'desc' + $index" [(ngModel)]="item.descripcion" maxlength="128" placeholder="Ej: Diseño de sitio web" /></td>
+                <td class="num"><input type="number" [name]="'cant' + $index" [(ngModel)]="item.cantidad" min="0.01" step="any" /></td>
+                <td class="num"><input type="number" [name]="'precio' + $index" [(ngModel)]="item.precio_unitario" min="0" step="0.01" /></td>
+                <td class="der">{{ (+item.cantidad || 0) * (+item.precio_unitario || 0) | currency: 'ARS' : '$' : '1.2-2' }}</td>
+                <td>
+                  @if (!soloLectura && items.length > 1) {
+                    <button type="button" class="boton boton-chico boton-peligro" (click)="quitarItem($index)" aria-label="Quitar ítem">✕</button>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      @if (!soloLectura) {
+        <button type="button" class="boton boton-secundario boton-chico" style="margin-top: 12px" (click)="agregarItem()">+ Agregar otra línea</button>
+      }
+      <div class="total">Total: {{ total | currency: 'ARS' : '$' : '1.2-2' }}</div>
+
+      <label class="campo" style="margin-top: 14px">
+        Observaciones (opcional)
+        <textarea name="obs" rows="2" [(ngModel)]="observaciones"></textarea>
+      </label>
+    </section>
+  </fieldset>
+
+  @if (soloLectura) {
+    <section class="tarjeta">
+      @if (simulado) {
+        <div class="aviso aviso-info">Factura emitida en modo simulación: el CAE es ficticio y no tiene validez fiscal.</div>
+      }
+      @if (cae) {
+        <p><strong>CAE:</strong> {{ cae }} &nbsp; <strong>Vencimiento:</strong> {{ caeVencimiento | date: 'dd/MM/yyyy' }}</p>
+      }
+      <a class="boton" [href]="api.urlPdf(id!)" target="_blank" rel="noopener">Ver / descargar PDF</a>
+    </section>
+  } @else {
+    <div class="acciones">
+      <button type="button" class="boton boton-secundario" [disabled]="!puedeGuardar || trabajando" (click)="guardarBorrador()">
+        Guardar borrador
+      </button>
+      <button type="button" class="boton" [disabled]="!puedeGuardar || trabajando || (modalidad === 'arca' && !permitido(tipo))" (click)="emitir()">
+        {{ trabajando ? 'Procesando...' : modalidad === 'arca' ? 'Emitir Factura ' + tipo : 'Emitir comprobante no fiscal' }}
+      </button>
+    </div>
+    @if (!puedeGuardar) {
+      <p class="vacio" style="margin-top: 10px">Elegí un cliente y completá al menos una línea con descripción e importe.</p>
+    }
+  }
+}

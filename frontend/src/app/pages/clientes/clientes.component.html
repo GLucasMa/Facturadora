@@ -1,0 +1,93 @@
+<div class="encabezado-pagina">
+  <div>
+    <h1>Clientes</h1>
+    <p class="subtitulo">Las personas o empresas a las que les emitís comprobantes.</p>
+  </div>
+</div>
+
+@if (error) {
+  <div class="aviso aviso-error">{{ error }}</div>
+}
+@if (exito) {
+  <div class="aviso aviso-exito">{{ exito }}</div>
+}
+
+<section class="tarjeta">
+  <h2>{{ actual.id ? 'Editar cliente' : 'Nuevo cliente' }}</h2>
+  <form class="formulario" (ngSubmit)="guardar()">
+    <div class="grilla">
+      <label class="campo">
+        Nombre o razón social
+        <input type="text" name="nombre" [(ngModel)]="actual.nombre" required maxlength="200" placeholder="Ej: Juan Pérez" />
+      </label>
+      <label class="campo">
+        Documento
+        <select name="tipo_documento" [(ngModel)]="actual.tipo_documento">
+          @for (t of tiposDocumento; track t.valor) {
+            <option [value]="t.valor">{{ t.etiqueta }}</option>
+          }
+        </select>
+      </label>
+      @if (!sinDocumento) {
+        <label class="campo">
+          Número
+          <input type="text" name="numero_documento" [(ngModel)]="actual.numero_documento" required maxlength="13" placeholder="Solo números" />
+        </label>
+      }
+      <label class="campo">
+        Condición frente al IVA
+        <select name="condicion_iva" [(ngModel)]="actual.condicion_iva">
+          @for (c of condiciones; track c.valor) {
+            <option [value]="c.valor">{{ c.etiqueta }}</option>
+          }
+        </select>
+      </label>
+      <label class="campo">
+        Domicilio <small>(opcional)</small>
+        <input type="text" name="domicilio" [(ngModel)]="actual.domicilio" maxlength="200" />
+      </label>
+      <label class="campo">
+        Email <small>(opcional)</small>
+        <input type="email" name="email" [(ngModel)]="actual.email" />
+      </label>
+    </div>
+    <div class="acciones">
+      <button type="submit" class="boton" [disabled]="guardando || !actual.nombre?.trim()">
+        {{ guardando ? 'Guardando...' : actual.id ? 'Guardar cambios' : 'Agregar cliente' }}
+      </button>
+      @if (actual.id) {
+        <button type="button" class="boton boton-secundario" (click)="cancelar()">Cancelar</button>
+      }
+    </div>
+  </form>
+</section>
+
+<section class="tarjeta">
+  <h2>Clientes cargados</h2>
+  @if (cargando) {
+    <p class="vacio">Cargando...</p>
+  } @else if (clientes.length === 0) {
+    <p class="vacio">Todavía no cargaste ningún cliente.</p>
+  } @else {
+    <div class="scroll-x">
+      <table class="tabla">
+        <thead>
+          <tr><th>Nombre</th><th>Documento</th><th>Condición IVA</th><th></th></tr>
+        </thead>
+        <tbody>
+          @for (c of clientes; track c.id) {
+            <tr>
+              <td>{{ c.nombre }}</td>
+              <td>{{ etiquetaDocumento(c) }}</td>
+              <td>{{ etiquetaCondicion(c) }}</td>
+              <td class="acciones">
+                <button type="button" class="boton boton-chico boton-secundario" (click)="editar(c)">Editar</button>
+                <button type="button" class="boton boton-chico boton-peligro" (click)="eliminar(c)">Eliminar</button>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</section>

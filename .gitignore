@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+db.sqlite3
+media/
+.env
+core/.env
+
+node_modules/
+dist/
+.angular/

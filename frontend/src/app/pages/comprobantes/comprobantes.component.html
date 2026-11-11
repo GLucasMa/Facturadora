@@ -1,0 +1,66 @@
+<div class="encabezado-pagina">
+  <div>
+    <h1>Comprobantes</h1>
+    <p class="subtitulo">Armalos con calma como borrador y emitilos cuando estén listos.</p>
+  </div>
+  <a class="boton" routerLink="/comprobantes/nuevo">+ Nuevo comprobante</a>
+</div>
+
+@if (error) {
+  <div class="aviso aviso-error">{{ error }}</div>
+}
+
+<section class="tarjeta">
+  @if (cargando) {
+    <p class="vacio">Cargando...</p>
+  } @else if (comprobantes.length === 0) {
+    <p class="vacio">Todavía no hay comprobantes. Creá el primero con el botón de arriba.</p>
+  } @else {
+    <div class="scroll-x">
+      <table class="tabla">
+        <thead>
+          <tr>
+            <th>Número</th>
+            <th>Tipo</th>
+            <th>Cliente</th>
+            <th>Fecha</th>
+            <th class="der">Total</th>
+            <th>Estado</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (c of comprobantes; track c.id) {
+            <tr>
+              <td>{{ c.numero_formateado || '—' }}</td>
+              <td><span class="etiqueta" [class]="'etiqueta etiqueta-' + c.modalidad">{{ etiquetaModalidad(c) }}</span>
+                @if (c.simulado) { <span class="etiqueta etiqueta-no_fiscal" title="CAE simulado, sin validez fiscal">Simulada</span> }
+              </td>
+              <td>{{ c.cliente_nombre }}</td>
+              <td>{{ c.fecha | date: 'dd/MM/yyyy' }}</td>
+              <td class="der">{{ c.total | currency: 'ARS' : '$' : '1.2-2' }}</td>
+              <td><span class="etiqueta" [class]="'etiqueta etiqueta-' + c.estado">{{ c.estado === 'emitido' ? 'Emitido' : 'Borrador' }}</span></td>
+              <td class="acciones">
+                @if (c.estado === 'borrador') {
+                  <a class="boton boton-chico" [routerLink]="['/comprobantes', c.id]">Continuar</a>
+                  <button type="button" class="boton boton-chico boton-peligro" (click)="eliminar(c)">Eliminar</button>
+                } @else {
+                  <a class="boton boton-chico boton-secundario" [routerLink]="['/comprobantes', c.id]">Ver</a>
+                  <a class="boton boton-chico" [href]="api.urlPdf(c.id)" target="_blank" rel="noopener">PDF</a>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    @if (hayAnterior || haySiguiente) {
+      <div class="acciones" style="margin-top: 16px; justify-content: space-between">
+        <button type="button" class="boton boton-secundario boton-chico" [disabled]="!hayAnterior" (click)="cambiarPagina(-1)">← Anteriores</button>
+        <span class="vacio">{{ total }} comprobantes</span>
+        <button type="button" class="boton boton-secundario boton-chico" [disabled]="!haySiguiente" (click)="cambiarPagina(1)">Siguientes →</button>
+      </div>
+    }
+  }
+</section>

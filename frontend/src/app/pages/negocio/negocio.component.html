@@ -1,0 +1,98 @@
+<div class="encabezado-pagina">
+  <div>
+    <h1>Mi negocio</h1>
+    <p class="subtitulo">Estos datos aparecen en el encabezado de tus comprobantes.</p>
+  </div>
+</div>
+
+@if (error) {
+  <div class="aviso aviso-error">{{ error }}</div>
+}
+@if (exito) {
+  <div class="aviso aviso-exito">{{ exito }}</div>
+}
+
+@if (cargando) {
+  <p class="vacio">Cargando...</p>
+} @else {
+  <form class="formulario" (ngSubmit)="guardar()">
+    <section class="tarjeta">
+      <h2>Datos del emisor</h2>
+      <div class="grilla">
+        <label class="campo">
+          Razón social o nombre
+          <input type="text" name="razon_social" [(ngModel)]="emisor.razon_social" required maxlength="128" />
+        </label>
+        <label class="campo">
+          CUIT
+          <input type="text" name="cuit" [(ngModel)]="emisor.cuit" required maxlength="13" placeholder="20-12345678-9" />
+        </label>
+        <label class="campo">
+          Domicilio comercial
+          <input type="text" name="domicilio" [(ngModel)]="emisor.domicilio" required maxlength="200" />
+        </label>
+        <label class="campo">
+          Condición frente al IVA
+          <select name="condicion_iva_emisor" [(ngModel)]="emisor.condicion_iva_emisor">
+            @for (c of condiciones; track c.valor) {
+              <option [value]="c.valor">{{ c.etiqueta }}</option>
+            }
+          </select>
+          <small>Al guardar se define qué facturas podés emitir.</small>
+        </label>
+        <label class="campo">
+          Punto de venta (número)
+          <input type="number" name="punto_venta_numero" [(ngModel)]="emisor.punto_venta_numero" min="1" max="99999" required />
+        </label>
+        <label class="campo">
+          Ingresos Brutos <small>(opcional)</small>
+          <input type="text" name="ingresos_brutos" [(ngModel)]="emisor.ingresos_brutos" maxlength="48" />
+        </label>
+        <label class="campo">
+          Inicio de actividades <small>(opcional)</small>
+          <input type="date" name="inicio_actividades" [(ngModel)]="emisor.inicio_actividades" />
+        </label>
+        <label class="campo">
+          Email <small>(opcional)</small>
+          <input type="email" name="email" [(ngModel)]="emisor.email" />
+        </label>
+        <label class="campo">
+          Teléfono <small>(opcional)</small>
+          <input type="text" name="telefono" [(ngModel)]="emisor.telefono" maxlength="40" />
+        </label>
+      </div>
+    </section>
+
+    <section class="tarjeta">
+      <h2>Facturación electrónica (ARCA)</h2>
+      <p class="subtitulo" style="margin-bottom: 14px">
+        Con tu condición actual (guardada) podés emitir: <strong>{{ textoTiposPermitidos }}</strong>.
+      </p>
+      @if (modoSimulacion) {
+        <div class="aviso aviso-info">
+          Estás en modo simulación: no hace falta cargar certificados ni elegir un punto de venta de ARCA.
+        </div>
+      } @else if (puntosDeVenta.length === 0) {
+        <div class="aviso aviso-info">
+          Todavía no hay ningún punto de venta de ARCA cargado. Para emitir facturas electrónicas hay que
+          cargar el CUIT y el certificado digital en el panel de administración
+          (<a href="http://localhost:8000/admin/afip/taxpayer/" target="_blank" rel="noopener">Contribuyentes</a>);
+          mientras tanto podés usar comprobantes no fiscales.
+        </div>
+      }
+      <label class="campo" style="max-width: 360px">
+        Punto de venta de ARCA <small>(solo facturación real)</small>
+        <select name="punto_de_venta" [(ngModel)]="emisor.punto_de_venta">
+          <option [ngValue]="null">Sin punto de venta</option>
+          @for (p of puntosDeVenta; track p.id) {
+            <option [ngValue]="p.id">{{ p.number }} — {{ p.contribuyente }}</option>
+          }
+        </select>
+      </label>
+    </section>
+
+    <div class="acciones">
+      <button type="submit" class="boton" [disabled]="guardando">{{ guardando ? 'Guardando...' : 'Guardar' }}</button>
+    </div>
+  </form>
+}

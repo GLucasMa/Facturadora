@@ -1,0 +1,20 @@
+@if (modoSimulacion) {
+  <div class="banner-simulacion" role="status">
+    <strong>MODO SIMULACIÓN</strong> — las facturas electrónicas se emiten con un CAE ficticio, sin conexión a ARCA y sin validez fiscal.
+  </div>
+}
+
+<header class="barra">
+  <div class="barra-contenido">
+    <a class="marca" routerLink="/comprobantes">Facturación rápida</a>
+    <nav>
+      <a routerLink="/comprobantes" routerLinkActive="activo">Comprobantes</a>
+      <a routerLink="/clientes" routerLinkActive="activo">Clientes</a>
+      <a routerLink="/configuracion" routerLinkActive="activo">Mi negocio</a>
+    </nav>
+  </div>
+</header>
+
+<main class="pagina">
+  <router-outlet />
+</main>

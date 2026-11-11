@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <style>
+    @page { size: A4; margin: 15mm; }
+    body { font-family: Helvetica, Arial, sans-serif; font-size: 11px; color: #111; }
+    .aviso { border: 2px solid #111; text-align: center; font-weight: bold; font-size: 14px; padding: 8px; margin-bottom: 12px; }
+    .cabecera { display: flex; justify-content: space-between; border: 1px solid #111; padding: 12px; }
+    .cabecera > div { width: 48%; }
+    h1 { font-size: 18px; margin: 0 0 6px; }
+    h2 { font-size: 15px; margin: 0 0 6px; }
+    .caja { border: 1px solid #111; padding: 10px; margin-top: 10px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th { background: #eee; text-align: left; padding: 6px; border: 1px solid #111; }
+    td { padding: 6px; border: 1px solid #ccc; }
+    .der { text-align: right; }
+    .total { margin-top: 10px; text-align: right; font-size: 15px; font-weight: bold; }
+    .pie { margin-top: 24px; text-align: center; font-weight: bold; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="aviso">{{ aviso }}</div>
+
+  <div class="cabecera">
+    <div>
+      <h1>{{ emisor.razon_social }}</h1>
+      <div>CUIT: {{ emisor.cuit }}</div>
+      <div>{{ emisor.domicilio }}</div>
+      <div>{{ emisor.get_condicion_iva_emisor_display }}</div>
+      {% if emisor.telefono %}<div>Tel: {{ emisor.telefono }}</div>{% endif %}
+      {% if emisor.email %}<div>{{ emisor.email }}</div>{% endif %}
+    </div>
+    <div>
+      <h2>{{ titulo }}</h2>
+      <div><strong>N°:</strong> {{ comprobante.numero_formateado }}</div>
+      <div><strong>Fecha:</strong> {{ comprobante.fecha|date:"d/m/Y" }}</div>
+      <div><strong>Condición de venta:</strong> {{ comprobante.condicion_venta }}</div>
+      {% if comprobante.cae %}
+      <div><strong>CAE:</strong> {{ comprobante.cae }}</div>
+      <div><strong>Vto. CAE:</strong> {{ comprobante.cae_vencimiento|date:"d/m/Y" }}</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="caja">
+    <strong>Cliente:</strong> {{ comprobante.cliente.nombre }}
+    {% if comprobante.cliente.numero_documento %}
+      &nbsp;|&nbsp; {{ comprobante.cliente.get_tipo_documento_display }}: {{ comprobante.cliente.numero_documento }}
+    {% endif %}
+    &nbsp;|&nbsp; {{ comprobante.cliente.get_condicion_iva_display }}
+    {% if comprobante.cliente.domicilio %}<div>{{ comprobante.cliente.domicilio }}</div>{% endif %}
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Descripción</th><th class="der">Cant.</th><th class="der">Precio unit.</th><th class="der">Subtotal</th></tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td>{{ item.descripcion }}</td>
+        <td class="der">{{ item.cantidad|floatformat:"-2" }}</td>
+        <td class="der">$ {{ item.precio_unitario|floatformat:"2g" }}</td>
+        <td class="der">$ {{ item.subtotal|floatformat:"2g" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="total">TOTAL: $ {{ comprobante.total|floatformat:"2g" }}</div>
+
+  {% if comprobante.observaciones %}
+  <div class="caja"><strong>Observaciones:</strong> {{ comprobante.observaciones|linebreaksbr }}</div>
+  {% endif %}
+
+  <div class="pie">{{ pie }}</div>
+</body>
+</html>
