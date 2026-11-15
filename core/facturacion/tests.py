@@ -1,10 +1,16 @@
+# El cliente de pruebas de DRF y las relaciones inversas de Django agregan atributos
+# dinámicos (respuesta.data, receipt.entries...) que el analizador de tipos no conoce.
+# pyright: reportAttributeAccessIssue=false, reportOptionalMemberAccess=false
+import threading
 from datetime import date, datetime, timezone
 from unittest import mock
 
-from django.test import TestCase, override_settings
+from django.db import connection, transaction
+from django.test import TestCase, TransactionTestCase, override_settings
 from django_afip import models as afip
 from rest_framework.test import APIClient
 
+from . import services
 from .models import Cliente, Comprobante, Emisor
 
 
@@ -91,6 +97,24 @@ class ComprobanteBorradorTests(BaseTest):
         self.assertEqual(datos['total'], '4000.00')
         self.assertEqual(datos['estado'], 'borrador')
 
+    def test_subtotales_se_redondean_y_el_total_los_suma(self):
+        respuesta = self.api.post(
+            '/api/comprobantes/',
+            {
+                'cliente': self.cliente.id,
+                'modalidad': 'no_fiscal',
+                'fecha': '2026-10-10',
+                'items': [
+                    {'descripcion': 'A', 'cantidad': '0.33', 'precio_unitario': '10.50'},
+                    {'descripcion': 'B', 'cantidad': '0.33', 'precio_unitario': '10.50'},
+                ],
+            },
+            format='json',
+        )
+        self.assertEqual(respuesta.status_code, 201, respuesta.content)
+        self.assertEqual(respuesta.data['items'][0]['subtotal'], '3.47')
+        self.assertEqual(respuesta.data['total'], '6.94')
+
     def test_exige_al_menos_un_item(self):
         respuesta = self.api.post(
             '/api/comprobantes/',
@@ -127,7 +151,7 @@ class NoFiscalTests(BaseTest):
         respuesta = self.api.get(f'/api/comprobantes/{datos["id"]}/pdf/')
 
         self.assertEqual(respuesta.status_code, 200)
-        self.assertEqual(respuesta['Content-Type'], 'application/pdf')
+        self.assertEqual(respuesta.headers['Content-Type'], 'application/pdf')
         self.assertTrue(respuesta.content.startswith(b'%PDF'))
 
     def test_emitido_no_se_puede_modificar_ni_borrar(self):
@@ -318,3 +342,66 @@ class TiposDeFacturaTests(BaseTest):
 
         self.assertEqual(respuesta.status_code, 422)
         self.assertIn('no podés emitir Factura C', respuesta.data['detail'])
+
+
+@override_settings(MODO_SIMULACION=False)
+class DobleEmisionTests(BaseTest):
+    def test_una_copia_desactualizada_no_vuelve_a_emitir(self):
+        self.crear_emisor()
+        datos = self.crear_comprobante('no_fiscal')
+        # Simula un segundo pedido que leyó el comprobante cuando todavía era borrador.
+        copia_vieja = Comprobante.objects.get(pk=datos['id'])
+        self.assertEqual(self.emitir(datos).status_code, 200)
+
+        with self.assertRaisesMessage(services.ErrorEmision, 'ya fue emitido'):
+            services.emitir(copia_vieja)
+
+        comprobante = Comprobante.objects.get(pk=datos['id'])
+        self.assertEqual(comprobante.numero_formateado, 'NF-00000001')
+
+    def test_emitido_no_se_puede_editar(self):
+        self.crear_emisor()
+        datos = self.crear_comprobante('no_fiscal')
+        self.emitir(datos)
+
+        respuesta = self.api.patch(
+            f'/api/comprobantes/{datos["id"]}/', {'observaciones': 'cambio'}, format='json'
+        )
+
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertEqual(Comprobante.objects.get(pk=datos['id']).observaciones, '')
+
+
+@override_settings(MODO_SIMULACION=False)
+class BloqueoEmisionTests(TransactionTestCase):
+    """Usa transacciones reales (dos conexiones) para probar el bloqueo de la fila."""
+
+    def test_emision_simultanea_se_rechaza_sin_esperar(self):
+        cliente = Cliente.objects.create(nombre='Juan Pérez')
+        Emisor.objects.create(razon_social='Mi Negocio', cuit='20-11111111-2', domicilio='Calle 123')
+        comprobante = Comprobante.objects.create(
+            cliente=cliente, modalidad='no_fiscal', fecha=date(2026, 10, 10)
+        )
+        comprobante.items.create(descripcion='Hosting', cantidad=1, precio_unitario=100)
+        resultado = {}
+
+        def otro_pedido():
+            try:
+                services.emitir(Comprobante.objects.get(pk=comprobante.pk))
+                resultado['emitido'] = True
+            except services.ErrorEmision as e:
+                resultado['error'] = str(e)
+            finally:
+                connection.close()
+
+        # Este pedido tiene tomada la fila, como si estuviera esperando la respuesta de ARCA.
+        with transaction.atomic():
+            Comprobante.objects.select_for_update().get(pk=comprobante.pk)
+            hilo = threading.Thread(target=otro_pedido)
+            hilo.start()
+            hilo.join(timeout=30)
+
+        self.assertFalse(hilo.is_alive())
+        self.assertNotIn('emitido', resultado)
+        self.assertIn('se está emitiendo', resultado.get('error', ''))
+        self.assertEqual(Comprobante.objects.get(pk=comprobante.pk).estado, 'borrador')

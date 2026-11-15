@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.db.models import ProtectedError
 from django.http import HttpResponse
 from django_afip.models import PointOfSales
@@ -36,13 +37,22 @@ class ComprobanteViewSet(viewsets.ModelViewSet):
     serializer_class = ComprobanteSerializer
 
     def _exigir_borrador(self, comprobante):
-        if comprobante.estado != Comprobante.Estado.BORRADOR:
+        # Relee el estado bloqueando la fila: si justo se está emitiendo, espera a que
+        # termine y ve el estado final (evita pisar un comprobante recién emitido).
+        estado = (
+            Comprobante.objects.select_for_update()
+            .values_list('estado', flat=True)
+            .get(pk=comprobante.pk)
+        )
+        if estado != Comprobante.Estado.BORRADOR:
             raise ValidationError({'detail': 'Un comprobante emitido no se puede modificar.'})
 
+    @transaction.atomic
     def perform_update(self, serializer):
         self._exigir_borrador(serializer.instance)
         serializer.save()
 
+    @transaction.atomic
     def perform_destroy(self, instance):
         self._exigir_borrador(instance)
         instance.delete()

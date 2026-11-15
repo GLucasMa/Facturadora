@@ -1,10 +1,11 @@
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
+from typing import TYPE_CHECKING
 
 from django.db import models
-from django.db.models import F, Sum
-
 from django_afip.models import PointOfSales, Receipt
+
+CENTAVO = Decimal('0.01')
 
 # El valor guardado coincide con los textos que usa django-afip para sus PDF.
 CONDICIONES_IVA_EMISOR = [
@@ -49,6 +50,10 @@ class Emisor(models.Model):
     class Meta:
         verbose_name_plural = 'emisor'
 
+    if TYPE_CHECKING:
+        # Django genera este método solo (por `choices`); se declara para el editor.
+        def get_condicion_iva_emisor_display(self) -> str: ...
+
     def __str__(self):
         return self.razon_social
 
@@ -58,7 +63,10 @@ class Emisor(models.Model):
 
     @property
     def punto_venta_efectivo(self) -> int:
-        return self.punto_de_venta.number if self.punto_de_venta_id else self.punto_venta_numero
+        punto_de_venta = self.punto_de_venta
+        if punto_de_venta is not None:
+            return punto_de_venta.number
+        return self.punto_venta_numero
 
     @classmethod
     def crear_demo(cls) -> 'Emisor':
@@ -105,6 +113,10 @@ class Cliente(models.Model):
 
     class Meta:
         ordering = ['nombre']
+
+    if TYPE_CHECKING:
+        def get_tipo_documento_display(self) -> str: ...
+        def get_condicion_iva_display(self) -> str: ...
 
     def __str__(self):
         return self.nombre
@@ -173,18 +185,25 @@ class Comprobante(models.Model):
             )
         ]
 
+    if TYPE_CHECKING:
+        # Atributos que Django agrega solo; se declaran para que el editor los conozca.
+        items: models.Manager['ItemComprobante']
+
+        def get_modalidad_display(self) -> str: ...
+        def get_tipo_comprobante_display(self) -> str: ...
+
     def __str__(self):
         return f'{self.get_modalidad_display()} - {self.cliente}'
 
     @property
     def total(self) -> Decimal:
-        total = self.items.aggregate(t=Sum(F('cantidad') * F('precio_unitario')))['t']
-        return total or Decimal('0.00')
+        # .all() reutiliza los ítems ya cargados con prefetch_related (sin query extra por fila).
+        return sum((item.subtotal for item in self.items.all()), Decimal('0.00'))
 
     @property
     def numero_formateado(self) -> str:
         if self.modalidad == self.Modalidad.ARCA:
-            if self.numero_arca:
+            if self.numero_arca and self.punto_venta is not None:
                 return f'{self.punto_venta:04d}-{self.numero_arca:08d}'
             return ''
         if self.numero_interno:
@@ -195,12 +214,12 @@ class Comprobante(models.Model):
 class ItemComprobante(models.Model):
     comprobante = models.ForeignKey(Comprobante, on_delete=models.CASCADE, related_name='items')
     descripcion = models.CharField(max_length=128)
-    cantidad = models.DecimalField(max_digits=10, decimal_places=2, default=1)
+    cantidad = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('1'))
     precio_unitario = models.DecimalField(max_digits=12, decimal_places=2)
 
     @property
     def subtotal(self) -> Decimal:
-        return self.cantidad * self.precio_unitario
+        return (self.cantidad * self.precio_unitario).quantize(CENTAVO, rounding=ROUND_HALF_UP)
 
     def __str__(self):
         return self.descripcion

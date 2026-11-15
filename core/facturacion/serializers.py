@@ -19,14 +19,14 @@ class ClienteSerializer(serializers.ModelSerializer):
             'email',
         ]
 
-    def validate(self, datos):
-        tipo = datos.get('tipo_documento', getattr(self.instance, 'tipo_documento', None))
-        numero = datos.get('numero_documento', getattr(self.instance, 'numero_documento', ''))
+    def validate(self, attrs):
+        tipo = attrs.get('tipo_documento', getattr(self.instance, 'tipo_documento', None))
+        numero = attrs.get('numero_documento', getattr(self.instance, 'numero_documento', ''))
         if tipo != Cliente.TipoDocumento.SIN_IDENTIFICAR and not numero.strip():
             raise serializers.ValidationError(
                 {'numero_documento': 'Ingresá el número de documento.'}
             )
-        return datos
+        return attrs
 
 
 class EmisorSerializer(serializers.ModelSerializer):
@@ -102,15 +102,15 @@ class ComprobanteSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['estado', 'simulado', 'cae', 'cae_vencimiento', 'error_arca', 'creado']
 
-    def validate(self, datos):
-        modalidad = datos.get('modalidad', getattr(self.instance, 'modalidad', None))
-        tipo = datos.get('tipo_comprobante', getattr(self.instance, 'tipo_comprobante', None))
+    def validate(self, attrs):
+        modalidad = attrs.get('modalidad', getattr(self.instance, 'modalidad', None))
+        tipo = attrs.get('tipo_comprobante', getattr(self.instance, 'tipo_comprobante', None))
         if modalidad == Comprobante.Modalidad.ARCA:
             emisor = services.obtener_emisor()
             mensaje = emisor and services.error_tipo_no_permitido(emisor, tipo)
             if mensaje:
                 raise serializers.ValidationError({'tipo_comprobante': mensaje})
-        return datos
+        return attrs
 
     def validate_items(self, items):
         if not items:
@@ -118,26 +118,26 @@ class ComprobanteSerializer(serializers.ModelSerializer):
         return items
 
     @transaction.atomic
-    def create(self, datos):
-        items = datos.pop('items')
-        comprobante = Comprobante.objects.create(**datos)
+    def create(self, validated_data):
+        items = validated_data.pop('items')
+        comprobante = Comprobante.objects.create(**validated_data)
         ItemComprobante.objects.bulk_create(
             [ItemComprobante(comprobante=comprobante, **item) for item in items]
         )
         return comprobante
 
     @transaction.atomic
-    def update(self, comprobante, datos):
-        items = datos.pop('items', None)
-        for campo, valor in datos.items():
-            setattr(comprobante, campo, valor)
-        comprobante.save()
+    def update(self, instance, validated_data):
+        items = validated_data.pop('items', None)
+        for campo, valor in validated_data.items():
+            setattr(instance, campo, valor)
+        instance.save()
         if items is not None:
-            comprobante.items.all().delete()
+            instance.items.all().delete()
             ItemComprobante.objects.bulk_create(
-                [ItemComprobante(comprobante=comprobante, **item) for item in items]
+                [ItemComprobante(comprobante=instance, **item) for item in items]
             )
-        return comprobante
+        return instance
 
 
 class PuntoDeVentaSerializer(serializers.ModelSerializer):

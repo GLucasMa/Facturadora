@@ -4,7 +4,7 @@ import secrets
 from datetime import timedelta
 
 from django.conf import settings
-from django.db import transaction
+from django.db import OperationalError, transaction
 from django.db.models import Max
 from django.template.loader import render_to_string
 
@@ -14,7 +14,7 @@ from django_afip.models import ClientVatCondition
 from .models import Cliente, Comprobante, Emisor
 
 CODIGO_AFIP_FACTURA_C = '11'
-CONCEPTO_ARCA = {
+CONCEPTO_ARCA: dict[str, str] = {
     Comprobante.Concepto.PRODUCTOS: '1',
     Comprobante.Concepto.SERVICIOS: '2',
 }
@@ -48,6 +48,33 @@ def error_tipo_no_permitido(emisor: Emisor, tipo: str) -> str | None:
 
 
 def emitir(comprobante: Comprobante) -> Comprobante:
+    """Emite el comprobante. Devuelve la instancia actualizada (releída de la base).
+
+    Toma un bloqueo sobre la fila del comprobante mientras dura la emisión, para que
+    un doble clic o dos pestañas no puedan emitirlo dos veces (dos CAE, dos números).
+    """
+    error: ErrorEmision | None = None
+    with transaction.atomic():
+        try:
+            # nowait: si otro pedido ya lo está emitiendo, falla enseguida en vez de esperar.
+            bloqueado = Comprobante.objects.select_for_update(nowait=True).get(pk=comprobante.pk)
+        except OperationalError as e:
+            raise ErrorEmision(
+                'Este comprobante se está emitiendo en este momento. '
+                'Esperá unos segundos y actualizá la página.'
+            ) from e
+        try:
+            _emitir_bloqueado(bloqueado)
+        except ErrorEmision as e:
+            # Se relanza fuera de la transacción para que no se pierda el `error_arca` guardado.
+            error = e
+    if error is not None:
+        raise error
+    return bloqueado
+
+
+def _emitir_bloqueado(comprobante: Comprobante) -> None:
+    # El estado se valida recién acá, con la fila ya bloqueada y releída de la base.
     if comprobante.estado != Comprobante.Estado.BORRADOR:
         raise ErrorEmision('Este comprobante ya fue emitido.')
     if not comprobante.items.exists() or comprobante.total <= 0:
@@ -67,7 +94,6 @@ def emitir(comprobante: Comprobante) -> Comprobante:
             _emitir_arca(comprobante, emisor)
     else:
         _emitir_no_fiscal(comprobante)
-    return comprobante
 
 
 def _emitir_no_fiscal(comprobante: Comprobante) -> None:
@@ -132,11 +158,12 @@ def _emitir_arca(comprobante: Comprobante, emisor: Emisor) -> None:
         _registrar_error(comprobante, mensaje)
         raise ErrorEmision(mensaje) from e
 
+    validacion = afip.ReceiptValidation.objects.get(receipt=receipt)
     comprobante.receipt = receipt
     comprobante.punto_venta = receipt.point_of_sales.number
     comprobante.numero_arca = receipt.receipt_number
-    comprobante.cae = receipt.validation.cae
-    comprobante.cae_vencimiento = receipt.validation.cae_expiration
+    comprobante.cae = validacion.cae
+    comprobante.cae_vencimiento = validacion.cae_expiration
     comprobante.estado = Comprobante.Estado.EMITIDO
     comprobante.error_arca = ''
     comprobante.save()
@@ -223,10 +250,14 @@ def pdf_comprobante(comprobante: Comprobante) -> bytes:
     """Devuelve el PDF del comprobante emitido (ARCA, simulado o no fiscal)."""
     if comprobante.estado != Comprobante.Estado.EMITIDO:
         raise ErrorEmision('El comprobante todavía no fue emitido.')
+    emisor = Emisor.objects.first()
+    if emisor is None:
+        raise ErrorEmision('Faltan los datos de tu negocio. Completalos en la sección Mi negocio.')
 
     if comprobante.modalidad == Comprobante.Modalidad.NO_FISCAL:
         return _renderizar_pdf(
             comprobante,
+            emisor,
             titulo='Comprobante no fiscal',
             aviso='DOCUMENTO NO VÁLIDO COMO FACTURA',
             pie='Este documento no es una factura y no tiene validez fiscal.',
@@ -234,28 +265,34 @@ def pdf_comprobante(comprobante: Comprobante) -> bytes:
     if comprobante.simulado:
         return _renderizar_pdf(
             comprobante,
+            emisor,
             titulo=comprobante.get_tipo_comprobante_display(),
             aviso='SIMULACIÓN - SIN VALIDEZ FISCAL',
             pie='Factura generada en modo simulación. El CAE es ficticio y no fue emitido por ARCA.',
         )
 
-    pdf = _generar_pdf_arca(comprobante, Emisor.objects.first())
+    pdf = _generar_pdf_arca(comprobante, emisor)
     with pdf.pdf_file.open('rb') as f:
         return f.read()
 
 
-def _renderizar_pdf(comprobante: Comprobante, titulo: str, aviso: str, pie: str) -> bytes:
+def _renderizar_pdf(
+    comprobante: Comprobante, emisor: Emisor, titulo: str, aviso: str, pie: str
+) -> bytes:
     from weasyprint import HTML
 
     html = render_to_string(
         'facturacion/comprobante_pdf.html',
         {
             'comprobante': comprobante,
-            'emisor': Emisor.objects.first(),
+            'emisor': emisor,
             'items': list(comprobante.items.all()),
             'titulo': titulo,
             'aviso': aviso,
             'pie': pie,
         },
     )
-    return HTML(string=html).write_pdf()
+    pdf = HTML(string=html).write_pdf()
+    if pdf is None:
+        raise ErrorEmision('No se pudo generar el PDF.')
+    return pdf

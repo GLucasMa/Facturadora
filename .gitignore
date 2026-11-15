@@ -6,6 +6,9 @@ media/
 .env
 core/.env
 
+# Respaldo del repo viejo del frontend (historial anterior al repo unificado).
+frontend/.git-respaldo/
+
 node_modules/
 dist/
 .angular/
