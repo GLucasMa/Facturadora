@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
 import { ApiService, mensajeError } from '../../api.service';
+import { errorDocumento } from '../../documento';
 import { CONDICIONES_IVA_CLIENTE, Cliente, TIPOS_DOCUMENTO } from '../../models';
 
 function clienteVacio(): Partial<Cliente> {
@@ -54,6 +55,11 @@ export class ClientesComponent implements OnInit {
 
   get sinDocumento(): boolean {
     return this.actual.tipo_documento === '99';
+  }
+
+  /** Problema del número de documento que se está escribiendo ('' si está bien o vacío). */
+  get errorDocumento(): string {
+    return errorDocumento(this.actual.tipo_documento, this.actual.numero_documento);
   }
 
   editar(cliente: Cliente): void {

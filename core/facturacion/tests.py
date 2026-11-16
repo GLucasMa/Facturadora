@@ -10,7 +10,7 @@ from django.test import TestCase, TransactionTestCase, override_settings
 from django_afip import models as afip
 from rest_framework.test import APIClient
 
-from . import services
+from . import services, validators
 from .models import Cliente, Comprobante, Emisor
 
 
@@ -405,3 +405,85 @@ class BloqueoEmisionTests(TransactionTestCase):
         self.assertNotIn('emitido', resultado)
         self.assertIn('se está emitiendo', resultado.get('error', ''))
         self.assertEqual(Comprobante.objects.get(pk=comprobante.pk).estado, 'borrador')
+
+
+class DocumentosTests(TestCase):
+    """Validación de CUIT, CUIL y DNI (dígito verificador y formato)."""
+
+    def setUp(self):
+        self.api = APIClient()
+
+    def crear_cliente(self, tipo, numero):
+        return self.api.post(
+            '/api/clientes/',
+            {'nombre': 'X', 'tipo_documento': tipo, 'numero_documento': numero, 'condicion_iva': '1'},
+            format='json',
+        )
+
+    def test_digito_verificador(self):
+        self.assertEqual(validators.digito_verificador_cuit('2011111111'), 2)
+        self.assertEqual(validators.digito_verificador_cuit('2010000013'), 0)
+        # Hay numeraciones a las que no les corresponde ningún dígito: no existen.
+        self.assertIsNone(validators.digito_verificador_cuit('2010000005'))
+
+    def test_cuit_valido_se_guarda_con_guiones(self):
+        for escrito in ('20111111112', '20-11111111-2', ' 20 11111111 2 '):
+            respuesta = self.crear_cliente('80', escrito)
+            self.assertEqual(respuesta.status_code, 201, respuesta.content)
+            self.assertEqual(respuesta.data['numero_documento'], '20-11111111-2')
+
+    def test_cuit_con_digito_verificador_incorrecto_se_rechaza(self):
+        respuesta = self.crear_cliente('80', '20-11111111-3')
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertIn('no es válido', respuesta.data['numero_documento'][0])
+
+    def test_cuit_con_cantidad_de_numeros_incorrecta_se_rechaza(self):
+        respuesta = self.crear_cliente('80', '2011111111')
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertIn('11 números', respuesta.data['numero_documento'][0])
+
+    def test_cuil_se_valida_igual_y_se_nombra_como_cuil(self):
+        respuesta = self.crear_cliente('86', '20-11111111-3')
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertIn('CUIL', respuesta.data['numero_documento'][0])
+
+    def test_documento_con_letras_se_rechaza(self):
+        respuesta = self.crear_cliente('80', '20-1111A111-2')
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertIn('solo números', respuesta.data['numero_documento'][0])
+
+    def test_dni_se_guarda_sin_puntos(self):
+        respuesta = self.crear_cliente('96', '30.111.222')
+        self.assertEqual(respuesta.status_code, 201, respuesta.content)
+        self.assertEqual(respuesta.data['numero_documento'], '30111222')
+
+    def test_dni_demasiado_corto_se_rechaza(self):
+        self.assertEqual(self.crear_cliente('96', '12345').status_code, 400)
+
+    def test_sin_identificar_no_exige_numero(self):
+        self.assertEqual(self.crear_cliente('99', '').status_code, 201)
+
+    def test_edicion_parcial_no_revisa_un_documento_que_no_cambia(self):
+        # Cliente cargado antes de que existiera la validación, con un CUIT mal escrito.
+        cliente = Cliente.objects.create(nombre='Viejo', tipo_documento='80', numero_documento='123')
+        respuesta = self.api.patch(
+            f'/api/clientes/{cliente.id}/', {'email': 'viejo@ejemplo.com'}, format='json'
+        )
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+
+    @override_settings(MODO_SIMULACION=False)
+    def test_cuit_del_negocio_se_valida_y_se_formatea(self):
+        datos = {
+            'razon_social': 'Mi Negocio',
+            'cuit': '20111111113',
+            'domicilio': 'Calle 123',
+            'condicion_iva_emisor': 'Responsable Monotributo',
+            'punto_venta_numero': 1,
+        }
+        respuesta = self.api.put('/api/emisor/', datos, format='json')
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertIn('no es válido', respuesta.data['cuit'][0])
+
+        respuesta = self.api.put('/api/emisor/', {**datos, 'cuit': '20111111112'}, format='json')
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        self.assertEqual(Emisor.objects.get().cuit, '20-11111111-2')

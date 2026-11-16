@@ -1,7 +1,9 @@
 import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
+import { environment } from '../../../environments/environment';
 import { ApiService, mensajeError } from '../../api.service';
+import { errorCuit } from '../../documento';
 import { CONDICIONES_IVA_EMISOR, Emisor, PuntoDeVenta } from '../../models';
 
 @Component({
@@ -12,6 +14,7 @@ import { CONDICIONES_IVA_EMISOR, Emisor, PuntoDeVenta } from '../../models';
 })
 export class NegocioComponent implements OnInit {
   readonly condiciones = CONDICIONES_IVA_EMISOR;
+  readonly urlContribuyentes = `${environment.adminUrl}/afip/taxpayer/`;
 
   emisor: Emisor = {
     razon_social: '',
@@ -35,6 +38,11 @@ export class NegocioComponent implements OnInit {
   exito = '';
 
   constructor(private api: ApiService) {}
+
+  /** Problema del CUIT que se está escribiendo ('' si está bien o vacío). */
+  get errorCuit(): string {
+    return this.emisor.cuit.trim() ? errorCuit(this.emisor.cuit.trim()) : '';
+  }
 
   get textoTiposPermitidos(): string {
     return this.emisor.tipos_factura_permitidos.map((t) => `Factura ${t}`).join(' y ');

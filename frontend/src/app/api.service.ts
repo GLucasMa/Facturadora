@@ -2,9 +2,11 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Observable, map, shareReplay } from 'rxjs';
 
+import { environment } from '../environments/environment';
 import { Cliente, Comprobante, Emisor, Pagina, PuntoDeVenta } from './models';
 
-export const API_URL = 'http://localhost:8000/api';
+/** Dirección de la API: cambia sola entre desarrollo y publicación (ver `src/environments`). */
+export const API_URL = environment.apiUrl;
 
 /** Convierte un error de la API en un texto que el usuario pueda entender. */
 export function mensajeError(error: unknown): string {

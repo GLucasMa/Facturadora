@@ -31,7 +31,11 @@
       @if (!sinDocumento) {
         <label class="campo">
           Número
-          <input type="text" name="numero_documento" [(ngModel)]="actual.numero_documento" required maxlength="13" placeholder="Solo números" />
+          <input type="text" name="numero_documento" [(ngModel)]="actual.numero_documento" required maxlength="13"
+            [placeholder]="actual.tipo_documento === '96' ? 'Ej: 30111222' : 'Ej: 20-12345678-9'" />
+          @if (errorDocumento) {
+            <small class="error-campo" role="alert">{{ errorDocumento }}</small>
+          }
         </label>
       }
       <label class="campo">
@@ -52,7 +56,7 @@
       </label>
     </div>
     <div class="acciones">
-      <button type="submit" class="boton" [disabled]="guardando || !actual.nombre?.trim()">
+      <button type="submit" class="boton" [disabled]="guardando || !actual.nombre?.trim() || !!errorDocumento">
         {{ guardando ? 'Guardando...' : actual.id ? 'Guardar cambios' : 'Agregar cliente' }}
       </button>
       @if (actual.id) {

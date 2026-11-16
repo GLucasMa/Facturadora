@@ -26,6 +26,9 @@
         <label class="campo">
           CUIT
           <input type="text" name="cuit" [(ngModel)]="emisor.cuit" required maxlength="13" placeholder="20-12345678-9" />
+          @if (errorCuit) {
+            <small class="error-campo" role="alert">{{ errorCuit }}</small>
+          }
         </label>
         <label class="campo">
           Domicilio comercial
@@ -76,7 +79,7 @@
         <div class="aviso aviso-info">
           Todavía no hay ningún punto de venta de ARCA cargado. Para emitir facturas electrónicas hay que
           cargar el CUIT y el certificado digital en el panel de administración
-          (<a href="http://localhost:8000/admin/afip/taxpayer/" target="_blank" rel="noopener">Contribuyentes</a>);
+          (<a [href]="urlContribuyentes" target="_blank" rel="noopener">Contribuyentes</a>);
           mientras tanto podés usar comprobantes no fiscales.
         </div>
       }
@@ -92,7 +95,7 @@
     </section>
 
     <div class="acciones">
-      <button type="submit" class="boton" [disabled]="guardando">{{ guardando ? 'Guardando...' : 'Guardar' }}</button>
+      <button type="submit" class="boton" [disabled]="guardando || !!errorCuit">{{ guardando ? 'Guardando...' : 'Guardar' }}</button>
     </div>
   </form>
 }

@@ -31,8 +31,26 @@ npm start
 ```
 
 - App: http://localhost:4200 · API: http://localhost:8000/api/ · Admin: http://localhost:8000/admin
-- Base de datos: copiar `core/.env.example` a `core/.env` y completar `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
+- Configuración: copiar `core/.env.example` a `core/.env` y completar `DB_NAME`, `DB_USER`, `DB_PASSWORD`. Dejar `DEBUG=True` para desarrollar.
 - Tests: `python manage.py test facturacion` (desde `core/`).
+
+## Configuración por entorno
+
+Nada que cambie entre tu máquina y un servidor está escrito en el código.
+
+**Backend** (`core/.env`, ver `core/.env.example`):
+
+| Variable | Para qué | En tu máquina | En un servidor |
+| --- | --- | --- | --- |
+| `DEBUG` | Errores detallados | `True` | `False` (valor por defecto) |
+| `SECRET_KEY` | Firma sesiones y cookies | no hace falta | **obligatoria** y secreta |
+| `ALLOWED_HOSTS` | Dominios del backend | no hace falta | `midominio.com.ar` |
+| `CORS_ALLOWED_ORIGINS` | Frontends que pueden usar la API | `http://localhost:4200` (por defecto) | `https://midominio.com.ar` |
+| `MODO_SIMULACION` | CAE ficticio o ARCA real | `True` (por defecto) | `False` para facturar de verdad |
+
+Con `DEBUG=False` y sin `SECRET_KEY` el backend no arranca y avisa qué falta.
+
+**Frontend** (`frontend/src/environments/`): `environment.development.ts` se usa con `npm start` (backend en `localhost:8000`) y `environment.ts` con `ng build` (backend en el mismo dominio, bajo `/api`).
 
 ## Modo simulación (`MODO_SIMULACION`)
 
@@ -71,6 +89,6 @@ Para pasar a producción: repetir con un Contribuyente con "is sandboxed" destil
 - Facturas **A y B con ARCA real**: hoy se pueden emitir en simulación, pero falta discriminar el IVA por alícuota (importes, `Vat` en django-afip).
 - **Multicomercio (SaaS)**: hoy hay una sola empresa (*Mi negocio*). Falta asociar clientes y comprobantes a una empresa y a usuarios.
 - Notas de crédito/débito y anulaciones.
-- Login de usuarios (hoy la API no tiene autenticación: no exponer fuera de tu red).
+- Login de usuarios (hoy la API no tiene autenticación: **no publicar en internet** hasta tenerlo, aunque la configuración ya esté lista).
 - Cambiar la contraseña del usuario `admin` de desarrollo.
 - Envío del PDF por email al cliente.

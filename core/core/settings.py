@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -21,16 +22,39 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / '.env')
 
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
+def _env_bool(nombre: str, por_defecto: bool) -> bool:
+    valor = os.environ.get(nombre)
+    if valor is None or not valor.strip():
+        return por_defecto
+    return valor.strip().lower() in ('1', 'true', 'si', 'sí', 'yes')
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-8pc!%8in6t_)t2at9f&aeq0n7jx+!fp8tyy(b1j1y=+t9!6f$('
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+def _env_lista(nombre: str, por_defecto: str = '') -> list[str]:
+    """Lee una lista separada por comas, por ejemplo: `a.com, b.com`."""
+    return [v.strip() for v in os.environ.get(nombre, por_defecto).split(',') if v.strip()]
 
-ALLOWED_HOSTS = []
+
+# Toda la configuración que cambia entre tu máquina y un servidor se lee de `core/.env`
+# (ver `core/.env.example`).
+
+# Modo desarrollo: muestra errores detallados. Apagado por defecto para que un servidor
+# mal configurado nunca quede en modo debug; en tu máquina poné DEBUG=True en `.env`.
+DEBUG = _env_bool('DEBUG', False)
+
+# Clave que firma sesiones y cookies. En un servidor tiene que venir de `.env` y ser secreta.
+SECRET_KEY = os.environ.get('SECRET_KEY', '').strip()
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            'Falta SECRET_KEY en core/.env. Para desarrollo alcanza con poner DEBUG=True; '
+            'en un servidor generá una clave con: '
+            'python -c "from django.core.management.utils import get_random_secret_key as g; print(g())"'
+        )
+    # Solo para desarrollo: esta clave es pública (está en el repositorio).
+    SECRET_KEY = 'django-insecure-8pc!%8in6t_)t2at9f&aeq0n7jx+!fp8tyy(b1j1y=+t9!6f$('
+
+# Dominios desde los que se puede entrar al backend (con DEBUG=True, localhost anda solo).
+ALLOWED_HOSTS = _env_lista('ALLOWED_HOSTS')
 
 
 # Application definition
@@ -59,10 +83,9 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# Angular corre en el servidor de desarrollo de `ng serve` (puerto 4200 por defecto).
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:4200',
-]
+# Direcciones del frontend que pueden llamar a la API. Por defecto, el servidor de
+# desarrollo de Angular (`ng serve`, puerto 4200).
+CORS_ALLOWED_ORIGINS = _env_lista('CORS_ALLOWED_ORIGINS', 'http://localhost:4200')
 
 ROOT_URLCONF = 'core.urls'
 
@@ -143,7 +166,7 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 # Con True no se contacta a ARCA: las facturas electrónicas salen con un CAE simulado
 # (sin validez fiscal) y se guardan solo en la base local. No requiere internet ni certificados.
-MODO_SIMULACION = os.environ.get('MODO_SIMULACION', 'True').strip().lower() in ('1', 'true', 'si', 'yes')
+MODO_SIMULACION = _env_bool('MODO_SIMULACION', True)
 
 REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'facturacion.pagination.PaginacionEstandar',

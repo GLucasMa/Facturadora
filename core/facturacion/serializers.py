@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from . import services
 from .models import Cliente, Comprobante, Emisor, ItemComprobante
+from .validators import DocumentoInvalido, normalizar_cuit, normalizar_dni
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -20,12 +21,28 @@ class ClienteSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
+        if self.instance is not None and not {'tipo_documento', 'numero_documento'} & attrs.keys():
+            # Edición parcial que no toca el documento: no hay nada que revisar.
+            return attrs
         tipo = attrs.get('tipo_documento', getattr(self.instance, 'tipo_documento', None))
         numero = attrs.get('numero_documento', getattr(self.instance, 'numero_documento', ''))
-        if tipo != Cliente.TipoDocumento.SIN_IDENTIFICAR and not numero.strip():
+        numero = numero.strip()
+        if tipo == Cliente.TipoDocumento.SIN_IDENTIFICAR:
+            return attrs
+        if not numero:
             raise serializers.ValidationError(
                 {'numero_documento': 'Ingresá el número de documento.'}
             )
+        try:
+            if tipo == Cliente.TipoDocumento.DNI:
+                numero = normalizar_dni(numero)
+            else:
+                nombre = 'CUIL' if tipo == Cliente.TipoDocumento.CUIL else 'CUIT'
+                numero = normalizar_cuit(numero, nombre)
+        except DocumentoInvalido as e:
+            raise serializers.ValidationError({'numero_documento': str(e)}) from e
+        # Se guarda siempre con el mismo formato (CUIT/CUIL con guiones, DNI solo números).
+        attrs['numero_documento'] = numero
         return attrs
 
 
@@ -51,6 +68,12 @@ class EmisorSerializer(serializers.ModelSerializer):
             'punto_de_venta_numero',
             'tipos_factura_permitidos',
         ]
+
+    def validate_cuit(self, valor):
+        try:
+            return normalizar_cuit(valor)
+        except DocumentoInvalido as e:
+            raise serializers.ValidationError(str(e)) from e
 
 
 class ItemComprobanteSerializer(serializers.ModelSerializer):

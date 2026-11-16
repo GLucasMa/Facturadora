@@ -66,6 +66,7 @@ label.campo {
 }
 
 label.campo small { font-weight: normal; color: var(--texto-suave); }
+label.campo small.error-campo { color: var(--error-texto); }
 
 input, select, textarea {
   padding: 10px 12px;
