@@ -3,7 +3,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Observable, map, shareReplay } from 'rxjs';
 
 import { environment } from '../environments/environment';
-import { Cliente, Comprobante, Emisor, Pagina, PuntoDeVenta } from './models';
+import { Cliente, Comprobante, Emisor, FiltrosComprobantes, Pagina, PuntoDeVenta } from './models';
 
 /** Dirección de la API: cambia sola entre desarrollo y publicación (ver `src/environments`). */
 export const API_URL = environment.apiUrl;
@@ -62,10 +62,24 @@ export class ApiService {
     return this.http.delete<void>(`${API_URL}/clientes/${id}/`);
   }
 
-  listarComprobantes(pagina: number): Observable<Pagina<Comprobante>> {
-    return this.http.get<Pagina<Comprobante>>(`${API_URL}/comprobantes/`, {
-      params: { page: pagina }
-    });
+  listarComprobantes(pagina: number, filtros?: FiltrosComprobantes): Observable<Pagina<Comprobante>> {
+    const params: Record<string, string | number> = { page: pagina };
+    for (const [clave, valor] of Object.entries(filtros ?? {})) {
+      if (typeof valor === 'string' && valor.trim()) {
+        params[clave] = valor.trim();
+      }
+    }
+    return this.http.get<Pagina<Comprobante>>(`${API_URL}/comprobantes/`, { params });
+  }
+
+  /** Crea un borrador nuevo copiando datos e ítems (fecha de hoy). */
+  duplicarComprobante(id: number): Observable<Comprobante> {
+    return this.http.post<Comprobante>(`${API_URL}/comprobantes/${id}/duplicar/`, {});
+  }
+
+  /** Crea (o devuelve, si ya hay uno) el borrador de nota de crédito de una factura emitida. */
+  crearNotaCredito(id: number): Observable<Comprobante> {
+    return this.http.post<Comprobante>(`${API_URL}/comprobantes/${id}/nota-de-credito/`, {});
   }
 
   obtenerComprobante(id: number): Observable<Comprobante> {

@@ -95,11 +95,39 @@ class ItemComprobanteSerializer(serializers.ModelSerializer):
         return valor
 
 
+class ComprobanteResumenSerializer(serializers.ModelSerializer):
+    """Datos mínimos para mostrar un comprobante relacionado (factura ↔ nota de crédito)."""
+
+    total = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    pendiente_de_acreditar = serializers.DecimalField(
+        max_digits=14, decimal_places=2, read_only=True, allow_null=True
+    )
+
+    class Meta:
+        model = Comprobante
+        fields = [
+            'id',
+            'nombre_tipo',
+            'numero_formateado',
+            'fecha',
+            'estado',
+            'total',
+            'pendiente_de_acreditar',
+        ]
+        read_only_fields = fields
+
+
 class ComprobanteSerializer(serializers.ModelSerializer):
     items = ItemComprobanteSerializer(many=True)
     cliente_nombre = serializers.CharField(source='cliente.nombre', read_only=True)
     total = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     numero_formateado = serializers.CharField(read_only=True)
+    nombre_tipo = serializers.CharField(read_only=True)
+    asociado = ComprobanteResumenSerializer(source='comprobante_asociado', read_only=True)
+    notas_credito = ComprobanteResumenSerializer(many=True, read_only=True)
+    pendiente_de_acreditar = serializers.DecimalField(
+        max_digits=14, decimal_places=2, read_only=True, allow_null=True
+    )
 
     class Meta:
         model = Comprobante
@@ -108,6 +136,11 @@ class ComprobanteSerializer(serializers.ModelSerializer):
             'cliente',
             'cliente_nombre',
             'modalidad',
+            'clase',
+            'nombre_tipo',
+            'asociado',
+            'notas_credito',
+            'pendiente_de_acreditar',
             'tipo_comprobante',
             'concepto',
             'fecha',
@@ -123,9 +156,22 @@ class ComprobanteSerializer(serializers.ModelSerializer):
             'items',
             'creado',
         ]
-        read_only_fields = ['estado', 'simulado', 'cae', 'cae_vencimiento', 'error_arca', 'creado']
+        read_only_fields = [
+            'clase',
+            'estado',
+            'simulado',
+            'cae',
+            'cae_vencimiento',
+            'error_arca',
+            'creado',
+        ]
 
     def validate(self, attrs):
+        if self.instance is not None and self.instance.es_nota_credito:
+            # La nota de crédito sigue a su factura: no se le cambia cliente, modalidad ni letra.
+            for campo in ('cliente', 'modalidad', 'tipo_comprobante'):
+                attrs.pop(campo, None)
+            return attrs
         modalidad = attrs.get('modalidad', getattr(self.instance, 'modalidad', None))
         tipo = attrs.get('tipo_comprobante', getattr(self.instance, 'tipo_comprobante', None))
         if modalidad == Comprobante.Modalidad.ARCA:

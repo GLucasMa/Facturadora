@@ -10,11 +10,60 @@
   <div class="aviso aviso-error">{{ error }}</div>
 }
 
+<section class="tarjeta filtros" aria-label="Filtros">
+  <label class="campo campo-buscar">
+    Buscar
+    <input type="search" name="buscar" [(ngModel)]="filtros.buscar" (ngModelChange)="filtrarAlEscribir()"
+      placeholder="Cliente o número (ej: 12 o 0001-00000012)" />
+  </label>
+  <label class="campo">
+    Estado
+    <select name="estado" [(ngModel)]="filtros.estado" (ngModelChange)="filtrar()">
+      <option value="">Todos</option>
+      <option value="borrador">Borradores</option>
+      <option value="emitido">Emitidos</option>
+    </select>
+  </label>
+  <label class="campo">
+    Tipo
+    <select name="tipo" [(ngModel)]="filtros.tipo" (ngModelChange)="filtrar()">
+      <option value="">Todos</option>
+      <option value="A">A</option>
+      <option value="B">B</option>
+      <option value="C">C</option>
+      <option value="no_fiscal">No fiscal</option>
+    </select>
+  </label>
+  <label class="campo">
+    Clase
+    <select name="clase" [(ngModel)]="filtros.clase" (ngModelChange)="filtrar()">
+      <option value="">Todas</option>
+      <option value="factura">Facturas</option>
+      <option value="nota_credito">Notas de crédito</option>
+    </select>
+  </label>
+  <label class="campo">
+    Desde
+    <input type="date" name="desde" [(ngModel)]="filtros.desde" (ngModelChange)="filtrar()" />
+  </label>
+  <label class="campo">
+    Hasta
+    <input type="date" name="hasta" [(ngModel)]="filtros.hasta" (ngModelChange)="filtrar()" />
+  </label>
+  @if (hayFiltros) {
+    <button type="button" class="boton boton-secundario boton-chico" (click)="limpiarFiltros()">Limpiar filtros</button>
+  }
+</section>
+
 <section class="tarjeta">
   @if (cargando) {
     <p class="vacio">Cargando...</p>
   } @else if (comprobantes.length === 0) {
-    <p class="vacio">Todavía no hay comprobantes. Creá el primero con el botón de arriba.</p>
+    @if (hayFiltros) {
+      <p class="vacio">Ningún comprobante coincide con los filtros.</p>
+    } @else {
+      <p class="vacio">Todavía no hay comprobantes. Creá el primero con el botón de arriba.</p>
+    }
   } @else {
     <div class="scroll-x">
       <table class="tabla">
@@ -32,14 +81,20 @@
         <tbody>
           @for (c of comprobantes; track c.id) {
             <tr>
-              <td>{{ c.numero_formateado || '—' }}</td>
-              <td><span class="etiqueta" [class]="'etiqueta etiqueta-' + c.modalidad">{{ etiquetaModalidad(c) }}</span>
+              <td class="sin-corte">{{ c.numero_formateado || '—' }}</td>
+              <td>
+                <span [class]="'etiqueta etiqueta-' + (c.clase === 'nota_credito' ? 'nota_credito' : c.modalidad)">{{ etiquetaTipo(c) }}</span>
                 @if (c.simulado) { <span class="etiqueta etiqueta-no_fiscal" title="CAE simulado, sin validez fiscal">Simulada</span> }
               </td>
               <td>{{ c.cliente_nombre }}</td>
-              <td>{{ c.fecha | date: 'dd/MM/yyyy' }}</td>
-              <td class="der">{{ c.total | currency: 'ARS' : '$' : '1.2-2' }}</td>
-              <td><span class="etiqueta" [class]="'etiqueta etiqueta-' + c.estado">{{ c.estado === 'emitido' ? 'Emitido' : 'Borrador' }}</span></td>
+              <td class="sin-corte">{{ c.fecha | date: 'dd/MM/yyyy' }}</td>
+              <td class="der sin-corte" [title]="c.clase === 'nota_credito' ? 'Las notas de crédito restan' : ''">
+                {{ c.clase === 'nota_credito' ? '−' : '' }}{{ c.total | currency: 'ARS' : '$' : '1.2-2' }}
+              </td>
+              <td>
+                <span [class]="'etiqueta etiqueta-' + c.estado">{{ c.estado === 'emitido' ? 'Emitido' : 'Borrador' }}</span>
+                @if (anulacion(c)) { <span class="etiqueta etiqueta-anulada">{{ anulacion(c) }}</span> }
+              </td>
               <td class="acciones">
                 @if (c.estado === 'borrador') {
                   <a class="boton boton-chico" [routerLink]="['/comprobantes', c.id]">Continuar</a>
@@ -47,6 +102,10 @@
                 } @else {
                   <a class="boton boton-chico boton-secundario" [routerLink]="['/comprobantes', c.id]">Ver</a>
                   <a class="boton boton-chico" [href]="api.urlPdf(c.id)" target="_blank" rel="noopener">PDF</a>
+                  @if (c.clase === 'factura') {
+                    <button type="button" class="boton boton-chico boton-secundario" (click)="duplicar(c)"
+                      title="Crea un borrador nuevo con los mismos datos y fecha de hoy">Duplicar</button>
+                  }
                 }
               </td>
             </tr>
@@ -55,12 +114,10 @@
       </table>
     </div>
 
-    @if (hayAnterior || haySiguiente) {
-      <div class="acciones" style="margin-top: 16px; justify-content: space-between">
-        <button type="button" class="boton boton-secundario boton-chico" [disabled]="!hayAnterior" (click)="cambiarPagina(-1)">← Anteriores</button>
-        <span class="vacio">{{ total }} comprobantes</span>
-        <button type="button" class="boton boton-secundario boton-chico" [disabled]="!haySiguiente" (click)="cambiarPagina(1)">Siguientes →</button>
-      </div>
-    }
+    <div class="acciones" style="margin-top: 16px; justify-content: space-between">
+      <button type="button" class="boton boton-secundario boton-chico" [disabled]="!hayAnterior" (click)="cambiarPagina(-1)">← Anteriores</button>
+      <span class="vacio">{{ total }} {{ total === 1 ? 'comprobante' : 'comprobantes' }}</span>
+      <button type="button" class="boton boton-secundario boton-chico" [disabled]="!haySiguiente" (click)="cambiarPagina(1)">Siguientes →</button>
+    </div>
   }
 </section>

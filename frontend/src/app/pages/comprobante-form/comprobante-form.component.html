@@ -1,10 +1,10 @@
 <div class="encabezado-pagina">
   <div>
-    <h1>
-      @if (soloLectura) { {{ modalidad === 'arca' ? 'Factura ' + tipo : 'Comprobante' }} {{ numero }} } @else if (id) { Continuar borrador } @else { Nuevo comprobante }
-    </h1>
+    <h1>{{ titulo }}</h1>
     <p class="subtitulo">
-      @if (soloLectura) { Ya fue emitido y no se puede modificar. } @else { Completá los datos a tu ritmo: podés guardar y seguir después. }
+      @if (soloLectura) { Ya fue emitido y no se puede modificar. }
+      @else if (esNotaCredito) { Anula total o parcialmente una factura ya emitida. }
+      @else { Completá los datos a tu ritmo: podés guardar y seguir después. }
     </p>
   </div>
   <a class="boton boton-secundario" routerLink="/comprobantes">← Volver</a>
@@ -15,6 +15,9 @@
 }
 @if (exito) {
   <div class="aviso aviso-exito">{{ exito }}</div>
+}
+@if (info) {
+  <div class="aviso aviso-info">{{ info }}</div>
 }
 @if (!soloLectura && emisor === null) {
   <div class="aviso aviso-info">
@@ -27,52 +30,68 @@
   <p class="vacio">Cargando...</p>
 } @else {
   <fieldset class="sin-borde" [disabled]="soloLectura || trabajando">
-    <section class="tarjeta">
-      <h2>1. ¿Qué tipo de comprobante querés hacer?</h2>
-      <div class="opciones">
-        <label class="opcion" [class.elegida]="modalidad === 'arca'">
-          <input type="radio" name="modalidad" value="arca" [(ngModel)]="modalidad" />
-          <strong>Factura electrónica (ARCA)</strong>
-          <span>Válida fiscalmente. Se envía a ARCA y recibe su CAE.</span>
-        </label>
-        <label class="opcion" [class.elegida]="modalidad === 'no_fiscal'">
-          <input type="radio" name="modalidad" value="no_fiscal" [(ngModel)]="modalidad" />
-          <strong>Comprobante no fiscal</strong>
-          <span>No se informa a ARCA. Sale con la leyenda “Documento no válido como factura”.</span>
-        </label>
-      </div>
-
-      @if (modalidad === 'arca') {
-        <h3 class="subtitulo-seccion">Tipo de factura</h3>
-        <div class="tipos">
-          @for (t of tipos; track t) {
-            <label class="tipo" [class.elegida]="tipo === t" [class.deshabilitada]="!permitido(t)">
-              <input type="radio" name="tipo" [value]="t" [(ngModel)]="tipo" [disabled]="!permitido(t)" />
-              Factura {{ t }}
-            </label>
-          }
-        </div>
-        @if (emisor) {
+    @if (esNotaCredito && asociado) {
+      <section class="tarjeta">
+        <h2>Factura que anula</h2>
+        <p class="relacionado">
+          <a [routerLink]="['/comprobantes', asociado.id]">{{ asociado.nombre_tipo }} {{ asociado.numero_formateado }}</a>
+          del {{ asociado.fecha | date: 'dd/MM/yyyy' }} — total {{ asociado.total | currency: 'ARS' : '$' : '1.2-2' }}
+        </p>
+        @if (!soloLectura && maximoNotaCredito !== null) {
           <p class="ayuda-tipo">
-            Con tu condición frente al IVA (<strong>{{ textoCondicion }}</strong>) podés emitir: {{ textoTiposPermitidos }}.
-            Podés cambiarla en <a routerLink="/configuracion">Mi negocio</a>.
+            Podés anular hasta <strong>{{ maximoNotaCredito | currency: 'ARS' : '$' : '1.2-2' }}</strong>.
+            El cliente, el tipo y la letra son los de la factura y no se cambian.
           </p>
         }
-      }
-    </section>
+      </section>
+    } @else {
+      <section class="tarjeta">
+        <h2>1. ¿Qué tipo de comprobante querés hacer?</h2>
+        <div class="opciones">
+          <label class="opcion" [class.elegida]="modalidad === 'arca'">
+            <input type="radio" name="modalidad" value="arca" [(ngModel)]="modalidad" />
+            <strong>Factura electrónica (ARCA)</strong>
+            <span>Válida fiscalmente. Se envía a ARCA y recibe su CAE.</span>
+          </label>
+          <label class="opcion" [class.elegida]="modalidad === 'no_fiscal'">
+            <input type="radio" name="modalidad" value="no_fiscal" [(ngModel)]="modalidad" />
+            <strong>Comprobante no fiscal</strong>
+            <span>No se informa a ARCA. Sale con la leyenda “Documento no válido como factura”.</span>
+          </label>
+        </div>
+
+        @if (modalidad === 'arca') {
+          <h3 class="subtitulo-seccion">Tipo de factura</h3>
+          <div class="tipos">
+            @for (t of tipos; track t) {
+              <label class="tipo" [class.elegida]="tipo === t" [class.deshabilitada]="!permitido(t)">
+                <input type="radio" name="tipo" [value]="t" [(ngModel)]="tipo" [disabled]="!permitido(t)" />
+                Factura {{ t }}
+              </label>
+            }
+          </div>
+          @if (emisor && !soloLectura) {
+            <p class="ayuda-tipo">
+              Con tu condición frente al IVA (<strong>{{ textoCondicion }}</strong>) podés emitir: {{ textoTiposPermitidos }}.
+              Podés cambiarla en <a routerLink="/configuracion">Mi negocio</a>.
+            </p>
+          }
+        }
+      </section>
+    }
 
     <section class="tarjeta">
-      <h2>2. Cliente y datos generales</h2>
+      <h2>{{ esNotaCredito ? 'Cliente y datos generales' : '2. Cliente y datos generales' }}</h2>
       <div class="grilla">
         <label class="campo">
           Cliente
-          <select name="cliente" [(ngModel)]="clienteId">
+          <select name="cliente" [(ngModel)]="clienteId" [disabled]="esNotaCredito">
             <option [ngValue]="null" disabled>Elegí un cliente</option>
             @for (c of clientes; track c.id) {
               <option [ngValue]="c.id">{{ c.nombre }}</option>
             }
           </select>
-          @if (!soloLectura) {
+          @if (!soloLectura && !esNotaCredito) {
             <small>¿No está? <a routerLink="/clientes">Cargalo en Clientes</a> y volvé.</small>
           }
         </label>
@@ -97,7 +116,7 @@
     </section>
 
     <section class="tarjeta">
-      <h2>3. Detalle</h2>
+      <h2>{{ esNotaCredito ? 'Qué se anula' : '3. Detalle' }}</h2>
       <div class="scroll-x">
         <table class="tabla items">
           <thead>
@@ -129,7 +148,15 @@
       @if (!soloLectura) {
         <button type="button" class="boton boton-secundario boton-chico" style="margin-top: 12px" (click)="agregarItem()">+ Agregar otra línea</button>
       }
-      <div class="total">Total: {{ total | currency: 'ARS' : '$' : '1.2-2' }}</div>
+      <div class="total">
+        {{ esNotaCredito ? 'Total a anular' : 'Total' }}: {{ total | currency: 'ARS' : '$' : '1.2-2' }}
+      </div>
+      @if (superaMaximo) {
+        <p class="error-total" role="alert">
+          Supera lo que queda por anular de la factura ({{ maximoNotaCredito | currency: 'ARS' : '$' : '1.2-2' }}).
+          Bajá cantidades o precios.
+        </p>
+      }
 
       <label class="campo" style="margin-top: 14px">
         Observaciones (opcional)
@@ -141,20 +168,50 @@
   @if (soloLectura) {
     <section class="tarjeta">
       @if (simulado) {
-        <div class="aviso aviso-info">Factura emitida en modo simulación: el CAE es ficticio y no tiene validez fiscal.</div>
+        <div class="aviso aviso-info">Emitido en modo simulación: el CAE es ficticio y no tiene validez fiscal.</div>
       }
       @if (cae) {
         <p><strong>CAE:</strong> {{ cae }} &nbsp; <strong>Vencimiento:</strong> {{ caeVencimiento | date: 'dd/MM/yyyy' }}</p>
       }
-      <a class="boton" [href]="api.urlPdf(id!)" target="_blank" rel="noopener">Ver / descargar PDF</a>
+
+      @if (notasCredito.length) {
+        <h3 class="subtitulo-seccion">Notas de crédito de esta factura</h3>
+        <ul class="relacionados">
+          @for (n of notasCredito; track n.id) {
+            <li>
+              <a [routerLink]="['/comprobantes', n.id]">{{ n.nombre_tipo }} {{ n.numero_formateado || '(borrador)' }}</a>
+              — {{ n.total | currency: 'ARS' : '$' : '1.2-2' }}
+              @if (n.estado === 'borrador') { <span class="etiqueta etiqueta-borrador">Borrador</span> }
+            </li>
+          }
+        </ul>
+        @if (pendienteDeAcreditar !== null) {
+          <p class="ayuda-tipo">
+            @if (pendienteDeAcreditar <= 0) { La factura está anulada por completo. }
+            @else { Queda sin anular: <strong>{{ pendienteDeAcreditar | currency: 'ARS' : '$' : '1.2-2' }}</strong>. }
+          </p>
+        }
+      }
+
+      <div class="acciones" style="margin-top: 14px">
+        <a class="boton" [href]="api.urlPdf(id!)" target="_blank" rel="noopener">Ver / descargar PDF</a>
+        @if (!esNotaCredito) {
+          <button type="button" class="boton boton-secundario" [disabled]="trabajando" (click)="duplicar()"
+            title="Crea un borrador nuevo con los mismos datos y fecha de hoy">Duplicar</button>
+        }
+        @if (puedeHacerNotaCredito) {
+          <button type="button" class="boton boton-peligro" [disabled]="trabajando" (click)="hacerNotaCredito()"
+            title="Arma una nota de crédito para anular esta factura, total o parcialmente">Anular con nota de crédito</button>
+        }
+      </div>
     </section>
   } @else {
     <div class="acciones">
       <button type="button" class="boton boton-secundario" [disabled]="!puedeGuardar || trabajando" (click)="guardarBorrador()">
         Guardar borrador
       </button>
-      <button type="button" class="boton" [disabled]="!puedeGuardar || trabajando || (modalidad === 'arca' && !permitido(tipo))" (click)="emitir()">
-        {{ trabajando ? 'Procesando...' : modalidad === 'arca' ? 'Emitir Factura ' + tipo : 'Emitir comprobante no fiscal' }}
+      <button type="button" class="boton" [disabled]="!puedeGuardar || trabajando || superaMaximo || (!esNotaCredito && modalidad === 'arca' && !permitido(tipo))" (click)="emitir()">
+        {{ textoBotonEmitir }}
       </button>
     </div>
     @if (!puedeGuardar) {

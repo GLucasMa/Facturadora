@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING
@@ -128,11 +130,19 @@ class Comprobante(models.Model):
     - `arca`: factura electrónica con CAE. Con MODO_SIMULACION el CAE es simulado
       (`simulado=True`) y no tiene validez fiscal.
     - `no_fiscal`: comprobante interno, NO válido como factura.
+
+    Cada uno es una factura o una nota de crédito. La nota de crédito anula total o
+    parcialmente una factura emitida (`comprobante_asociado`), con su misma modalidad,
+    letra y cliente, y tiene numeración propia.
     """
 
     class Modalidad(models.TextChoices):
         ARCA = 'arca', 'Factura electrónica (ARCA)'
         NO_FISCAL = 'no_fiscal', 'Comprobante no fiscal'
+
+    class Clase(models.TextChoices):
+        FACTURA = 'factura', 'Factura'
+        NOTA_CREDITO = 'nota_credito', 'Nota de crédito'
 
     class Estado(models.TextChoices):
         BORRADOR = 'borrador', 'Borrador'
@@ -149,6 +159,15 @@ class Comprobante(models.Model):
 
     cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name='comprobantes')
     modalidad = models.CharField(max_length=10, choices=Modalidad.choices, default=Modalidad.ARCA)
+    clase = models.CharField(max_length=12, choices=Clase.choices, default=Clase.FACTURA)
+    comprobante_asociado = models.ForeignKey(
+        'self',
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name='notas_credito',
+        help_text='Solo notas de crédito: la factura que anulan.',
+    )
     tipo_comprobante = models.CharField(
         max_length=1, choices=TipoFactura.choices, default=TipoFactura.C
     )
@@ -158,8 +177,8 @@ class Comprobante(models.Model):
     observaciones = models.TextField(blank=True)
     estado = models.CharField(max_length=10, choices=Estado.choices, default=Estado.BORRADOR)
 
-    # Solo no fiscales: numeración interna correlativa.
-    numero_interno = models.PositiveIntegerField(null=True, blank=True, unique=True)
+    # Solo no fiscales: numeración interna correlativa (una para facturas y otra para notas de crédito).
+    numero_interno = models.PositiveIntegerField(null=True, blank=True)
 
     # Solo ARCA (reales y simulados): numeración y CAE.
     simulado = models.BooleanField(default=False)
@@ -180,25 +199,57 @@ class Comprobante(models.Model):
         ordering = ['-creado']
         constraints = [
             models.UniqueConstraint(
-                fields=['simulado', 'tipo_comprobante', 'punto_venta', 'numero_arca'],
+                fields=['simulado', 'clase', 'tipo_comprobante', 'punto_venta', 'numero_arca'],
                 name='comprobante_numero_arca_unico',
-            )
+            ),
+            models.UniqueConstraint(
+                fields=['clase', 'numero_interno'], name='comprobante_numero_interno_unico'
+            ),
         ]
 
     if TYPE_CHECKING:
         # Atributos que Django agrega solo; se declaran para que el editor los conozca.
         items: models.Manager['ItemComprobante']
+        notas_credito: models.Manager['Comprobante']
+        comprobante_asociado_id: int | None
 
         def get_modalidad_display(self) -> str: ...
         def get_tipo_comprobante_display(self) -> str: ...
 
     def __str__(self):
-        return f'{self.get_modalidad_display()} - {self.cliente}'
+        return f'{self.nombre_tipo} - {self.cliente}'
+
+    @property
+    def es_nota_credito(self) -> bool:
+        return self.clase == self.Clase.NOTA_CREDITO
+
+    @property
+    def nombre_tipo(self) -> str:
+        """Ej: 'Factura C', 'Nota de crédito C', 'Comprobante no fiscal'."""
+        if self.modalidad == self.Modalidad.ARCA:
+            base = 'Nota de crédito' if self.es_nota_credito else 'Factura'
+            return f'{base} {self.tipo_comprobante}'
+        return 'Nota de crédito no fiscal' if self.es_nota_credito else 'Comprobante no fiscal'
 
     @property
     def total(self) -> Decimal:
         # .all() reutiliza los ítems ya cargados con prefetch_related (sin query extra por fila).
         return sum((item.subtotal for item in self.items.all()), Decimal('0.00'))
+
+    @property
+    def total_acreditado(self) -> Decimal:
+        """Suma de las notas de crédito emitidas sobre esta factura."""
+        return sum(
+            (nc.total for nc in self.notas_credito.all() if nc.estado == self.Estado.EMITIDO),
+            Decimal('0.00'),
+        )
+
+    @property
+    def pendiente_de_acreditar(self) -> Decimal | None:
+        """Cuánto queda por anular con notas de crédito (solo facturas emitidas)."""
+        if self.es_nota_credito or self.estado != self.Estado.EMITIDO:
+            return None
+        return self.total - self.total_acreditado
 
     @property
     def numero_formateado(self) -> str:
@@ -207,7 +258,8 @@ class Comprobante(models.Model):
                 return f'{self.punto_venta:04d}-{self.numero_arca:08d}'
             return ''
         if self.numero_interno:
-            return f'NF-{self.numero_interno:08d}'
+            prefijo = 'NC' if self.es_nota_credito else 'NF'
+            return f'{prefijo}-{self.numero_interno:08d}'
         return ''
 
 

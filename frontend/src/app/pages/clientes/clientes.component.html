@@ -67,11 +67,19 @@
 </section>
 
 <section class="tarjeta">
-  <h2>Clientes cargados</h2>
+  <div class="encabezado-pagina" style="margin-bottom: 14px">
+    <h2 style="margin: 0">Clientes cargados</h2>
+    @if (clientes.length > 0) {
+      <input type="search" name="buscar" [(ngModel)]="buscar" placeholder="Buscar por nombre, documento o email"
+        aria-label="Buscar cliente" style="flex: 1; max-width: 340px" />
+    }
+  </div>
   @if (cargando) {
     <p class="vacio">Cargando...</p>
   } @else if (clientes.length === 0) {
     <p class="vacio">Todavía no cargaste ningún cliente.</p>
+  } @else if (clientesFiltrados.length === 0) {
+    <p class="vacio">Ningún cliente coincide con “{{ buscar }}”.</p>
   } @else {
     <div class="scroll-x">
       <table class="tabla">
@@ -79,7 +87,7 @@
           <tr><th>Nombre</th><th>Documento</th><th>Condición IVA</th><th></th></tr>
         </thead>
         <tbody>
-          @for (c of clientes; track c.id) {
+          @for (c of clientesFiltrados; track c.id) {
             <tr>
               <td>{{ c.nombre }}</td>
               <td>{{ etiquetaDocumento(c) }}</td>

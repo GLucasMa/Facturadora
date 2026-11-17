@@ -17,6 +17,11 @@ function clienteVacio(): Partial<Cliente> {
   };
 }
 
+/** Minúsculas y sin tildes, para que "perez" encuentre a "Pérez". */
+function normalizar(texto: string | undefined): string {
+  return (texto ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+}
+
 @Component({
   selector: 'app-clientes',
   standalone: true,
@@ -28,6 +33,7 @@ export class ClientesComponent implements OnInit {
   readonly condiciones = CONDICIONES_IVA_CLIENTE;
 
   clientes: Cliente[] = [];
+  buscar = '';
   actual: Partial<Cliente> = clienteVacio();
   cargando = true;
   guardando = false;
@@ -51,6 +57,21 @@ export class ClientesComponent implements OnInit {
         this.cargando = false;
       }
     });
+  }
+
+  /** Clientes que coinciden con la búsqueda (por nombre, documento o email; sin importar tildes). */
+  get clientesFiltrados(): Cliente[] {
+    const texto = normalizar(this.buscar);
+    if (!texto) {
+      return this.clientes;
+    }
+    const soloNumeros = texto.replace(/\D/g, '');
+    return this.clientes.filter(
+      (c) =>
+        normalizar(c.nombre).includes(texto) ||
+        normalizar(c.email).includes(texto) ||
+        (soloNumeros.length > 0 && c.numero_documento.replace(/\D/g, '').includes(soloNumeros))
+    );
   }
 
   get sinDocumento(): boolean {

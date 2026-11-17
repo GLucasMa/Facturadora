@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import secrets
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.conf import settings
 from django.db import OperationalError, transaction
@@ -11,9 +11,11 @@ from django.template.loader import render_to_string
 from django_afip import models as afip
 from django_afip.models import ClientVatCondition
 
-from .models import Cliente, Comprobante, Emisor
+from .models import Cliente, Comprobante, Emisor, ItemComprobante
 
+# Códigos de ARCA por clase de comprobante (por ahora solo letra C con ARCA real).
 CODIGO_AFIP_FACTURA_C = '11'
+CODIGO_AFIP_NOTA_CREDITO_C = '13'
 CONCEPTO_ARCA: dict[str, str] = {
     Comprobante.Concepto.PRODUCTOS: '1',
     Comprobante.Concepto.SERVICIOS: '2',
@@ -45,6 +47,79 @@ def error_tipo_no_permitido(emisor: Emisor, tipo: str) -> str | None:
         f'Con tu condición frente al IVA ({emisor.get_condicion_iva_emisor_display()}) '
         f'no podés emitir Factura {tipo}. Podés emitir: {nombres}.'
     )
+
+
+def _pesos(valor) -> str:
+    """Importe con formato argentino: $ 1.234,50."""
+    texto = f'{valor:,.2f}'.replace(',', '_').replace('.', ',').replace('_', '.')
+    return f'$ {texto}'
+
+
+def _copiar_items(origen: Comprobante, destino: Comprobante) -> None:
+    ItemComprobante.objects.bulk_create(
+        [
+            ItemComprobante(
+                comprobante=destino,
+                descripcion=item.descripcion,
+                cantidad=item.cantidad,
+                precio_unitario=item.precio_unitario,
+            )
+            for item in origen.items.all()
+        ]
+    )
+
+
+@transaction.atomic
+def duplicar(comprobante: Comprobante) -> Comprobante:
+    """Crea un borrador nuevo con los mismos datos e ítems, con fecha de hoy."""
+    if comprobante.es_nota_credito:
+        raise ErrorEmision(
+            'Las notas de crédito no se duplican: hacé una nueva desde la factura que querés anular.'
+        )
+    copia = Comprobante.objects.create(
+        cliente=comprobante.cliente,
+        modalidad=comprobante.modalidad,
+        tipo_comprobante=comprobante.tipo_comprobante,
+        concepto=comprobante.concepto,
+        fecha=date.today(),
+        condicion_venta=comprobante.condicion_venta,
+        observaciones=comprobante.observaciones,
+    )
+    _copiar_items(comprobante, copia)
+    return copia
+
+
+@transaction.atomic
+def crear_nota_credito(factura: Comprobante) -> Comprobante:
+    """Crea una nota de crédito en borrador que anula la factura por el total pendiente.
+
+    Copia los ítems de la factura; el usuario puede bajar cantidades o quitar líneas
+    para hacer una nota de crédito parcial antes de emitirla.
+    """
+    if factura.es_nota_credito:
+        raise ErrorEmision('No se puede hacer una nota de crédito de otra nota de crédito.')
+    if factura.estado != Comprobante.Estado.EMITIDO:
+        raise ErrorEmision('Solo se pueden anular comprobantes ya emitidos. Un borrador se puede eliminar.')
+    if (factura.pendiente_de_acreditar or 0) <= 0:
+        raise ErrorEmision('Esta factura ya está anulada por completo con notas de crédito.')
+    borrador = factura.notas_credito.filter(estado=Comprobante.Estado.BORRADOR).first()
+    if borrador is not None:
+        # Evita juntar varios borradores para la misma factura: se sigue el que ya existe.
+        return borrador
+
+    nota = Comprobante.objects.create(
+        cliente=factura.cliente,
+        modalidad=factura.modalidad,
+        clase=Comprobante.Clase.NOTA_CREDITO,
+        comprobante_asociado=factura,
+        tipo_comprobante=factura.tipo_comprobante,
+        concepto=factura.concepto,
+        fecha=max(date.today(), factura.fecha),
+        condicion_venta=factura.condicion_venta,
+        observaciones=f'Anula {factura.nombre_tipo} {factura.numero_formateado}.',
+    )
+    _copiar_items(factura, nota)
+    return nota
 
 
 def emitir(comprobante: Comprobante) -> Comprobante:
@@ -84,6 +159,10 @@ def _emitir_bloqueado(comprobante: Comprobante) -> None:
     if emisor is None:
         raise ErrorEmision('Primero completá tus datos en la sección Mi negocio.')
 
+    if comprobante.es_nota_credito:
+        _emitir_nota_credito(comprobante, emisor)
+        return
+
     if comprobante.modalidad == Comprobante.Modalidad.ARCA:
         mensaje = error_tipo_no_permitido(emisor, comprobante.tipo_comprobante)
         if mensaje:
@@ -96,11 +175,43 @@ def _emitir_bloqueado(comprobante: Comprobante) -> None:
         _emitir_no_fiscal(comprobante)
 
 
+def _emitir_nota_credito(nota: Comprobante, emisor: Emisor) -> None:
+    # Bloquea la factura: dos notas de crédito simultáneas no pueden pasarse del total.
+    factura = (
+        Comprobante.objects.select_for_update()
+        .prefetch_related('items', 'notas_credito__items')
+        .get(pk=nota.comprobante_asociado_id)
+    )
+    pendiente = factura.pendiente_de_acreditar or 0
+    if nota.total > pendiente:
+        raise ErrorEmision(
+            f'La nota de crédito ({_pesos(nota.total)}) supera lo que queda por anular de la '
+            f'{factura.nombre_tipo} {factura.numero_formateado} ({_pesos(pendiente)}).'
+        )
+    if nota.fecha < factura.fecha:
+        raise ErrorEmision('La fecha de la nota de crédito no puede ser anterior a la de la factura.')
+
+    if nota.modalidad == Comprobante.Modalidad.NO_FISCAL:
+        _emitir_no_fiscal(nota)
+    elif factura.simulado:
+        # La nota de crédito de una factura simulada también es simulada (nunca va a ARCA).
+        _emitir_arca_simulado(nota, emisor)
+    elif modo_simulacion():
+        raise ErrorEmision(
+            'Esta factura fue emitida en ARCA de verdad: para anularla desactivá el modo simulación.'
+        )
+    else:
+        _emitir_arca(nota, emisor)
+
+
 def _emitir_no_fiscal(comprobante: Comprobante) -> None:
     with transaction.atomic():
         # Bloquea el emisor para que dos emisiones simultáneas no tomen el mismo número.
         Emisor.objects.select_for_update().first()
-        ultimo = Comprobante.objects.aggregate(m=Max('numero_interno'))['m'] or 0
+        ultimo = (
+            Comprobante.objects.filter(clase=comprobante.clase).aggregate(m=Max('numero_interno'))['m']
+            or 0
+        )
         comprobante.numero_interno = ultimo + 1
         comprobante.estado = Comprobante.Estado.EMITIDO
         comprobante.error_arca = ''
@@ -115,6 +226,7 @@ def _emitir_arca_simulado(comprobante: Comprobante, emisor: Emisor) -> None:
         ultimo = (
             Comprobante.objects.filter(
                 simulado=True,
+                clase=comprobante.clase,
                 tipo_comprobante=comprobante.tipo_comprobante,
                 punto_venta=punto_venta,
             ).aggregate(m=Max('numero_arca'))['m']
@@ -134,7 +246,7 @@ def _emitir_arca_simulado(comprobante: Comprobante, emisor: Emisor) -> None:
 def _emitir_arca(comprobante: Comprobante, emisor: Emisor) -> None:
     if comprobante.tipo_comprobante != Comprobante.TipoFactura.C:
         raise ErrorEmision(
-            'Con ARCA real todavía solo se emiten Facturas C. '
+            'Con ARCA real todavía solo se emiten Facturas C (y sus notas de crédito). '
             'Las Facturas A y B se pueden probar en modo simulación.'
         )
     if emisor.punto_de_venta is None:
@@ -185,9 +297,11 @@ def _crear_receipt(comprobante: Comprobante, emisor: Emisor) -> afip.Receipt:
     total = comprobante.total
     es_servicio = comprobante.concepto == Comprobante.Concepto.SERVICIOS
 
+    codigo = CODIGO_AFIP_NOTA_CREDITO_C if comprobante.es_nota_credito else CODIGO_AFIP_FACTURA_C
+
     receipt = afip.Receipt.objects.create(
         point_of_sales=emisor.punto_de_venta,
-        receipt_type=afip.ReceiptType.objects.get(code=CODIGO_AFIP_FACTURA_C),
+        receipt_type=afip.ReceiptType.objects.get(code=codigo),
         concept=afip.ConceptType.objects.get(code=CONCEPTO_ARCA[comprobante.concepto]),
         document_type=afip.DocumentType.objects.get(code=cliente.tipo_documento),
         document_number=_numero_documento(cliente),
@@ -201,6 +315,12 @@ def _crear_receipt(comprobante: Comprobante, emisor: Emisor) -> afip.Receipt:
         expiration_date=comprobante.fecha if es_servicio else None,
         client_vat_condition=ClientVatCondition.objects.get(code=cliente.condicion_iva),
     )
+    if comprobante.es_nota_credito:
+        # ARCA exige informar qué factura anula la nota de crédito.
+        factura = comprobante.comprobante_asociado
+        if factura is None or factura.receipt is None:
+            raise ErrorEmision('No se encontró la factura de ARCA que anula esta nota de crédito.')
+        receipt.related_receipts.add(factura.receipt)
     for item in comprobante.items.all():
         afip.ReceiptEntry.objects.create(
             receipt=receipt,
@@ -258,7 +378,7 @@ def pdf_comprobante(comprobante: Comprobante) -> bytes:
         return _renderizar_pdf(
             comprobante,
             emisor,
-            titulo='Comprobante no fiscal',
+            titulo=comprobante.nombre_tipo,
             aviso='DOCUMENTO NO VÁLIDO COMO FACTURA',
             pie='Este documento no es una factura y no tiene validez fiscal.',
         )
@@ -266,9 +386,12 @@ def pdf_comprobante(comprobante: Comprobante) -> bytes:
         return _renderizar_pdf(
             comprobante,
             emisor,
-            titulo=comprobante.get_tipo_comprobante_display(),
+            titulo=comprobante.nombre_tipo,
             aviso='SIMULACIÓN - SIN VALIDEZ FISCAL',
-            pie='Factura generada en modo simulación. El CAE es ficticio y no fue emitido por ARCA.',
+            pie=(
+                f'{comprobante.nombre_tipo} generada en modo simulación. '
+                'El CAE es ficticio y no fue emitido por ARCA.'
+            ),
         )
 
     pdf = _generar_pdf_arca(comprobante, emisor)

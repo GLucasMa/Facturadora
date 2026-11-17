@@ -109,3 +109,21 @@
   font-size: 14px;
   color: var(--texto-suave);
 }
+
+.relacionado {
+  margin: 0;
+  font-size: 15px;
+}
+
+.relacionados {
+  margin: 0;
+  padding-left: 20px;
+  line-height: 1.9;
+}
+
+.error-total {
+  margin: 8px 0 0;
+  text-align: right;
+  color: var(--error-texto);
+  font-weight: 600;
+}

@@ -21,7 +21,7 @@ class ItemInline(admin.TabularInline):
 
 @admin.register(Comprobante)
 class ComprobanteAdmin(admin.ModelAdmin):
-    list_display = ('numero_formateado', 'cliente', 'modalidad', 'tipo_comprobante', 'fecha', 'estado', 'simulado')
-    list_filter = ('modalidad', 'estado', 'simulado')
+    list_display = ('numero_formateado', 'nombre_tipo', 'cliente', 'fecha', 'estado', 'simulado')
+    list_filter = ('modalidad', 'clase', 'estado', 'simulado')
     search_fields = ('cliente__nombre',)
     inlines = [ItemInline]

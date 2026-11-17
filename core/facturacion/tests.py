@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 from unittest import mock
 
 from django.db import connection, transaction
+from django.template.loader import render_to_string
 from django.test import TestCase, TransactionTestCase, override_settings
 from django_afip import models as afip
 from rest_framework.test import APIClient
@@ -405,6 +406,234 @@ class BloqueoEmisionTests(TransactionTestCase):
         self.assertNotIn('emitido', resultado)
         self.assertIn('se está emitiendo', resultado.get('error', ''))
         self.assertEqual(Comprobante.objects.get(pk=comprobante.pk).estado, 'borrador')
+
+
+class NotaCreditoBase(BaseTest):
+    def nota_de_credito(self, factura, esperado=201):
+        respuesta = self.api.post(f'/api/comprobantes/{factura["id"]}/nota-de-credito/')
+        self.assertEqual(respuesta.status_code, esperado, respuesta.content)
+        return respuesta.data
+
+    def cambiar_items(self, comprobante, precio):
+        respuesta = self.api.patch(
+            f'/api/comprobantes/{comprobante["id"]}/',
+            {'items': [{'descripcion': 'Parcial', 'cantidad': '1', 'precio_unitario': precio}]},
+            format='json',
+        )
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        return respuesta.data
+
+    def ver(self, comprobante):
+        return self.api.get(f'/api/comprobantes/{comprobante["id"]}/').data
+
+
+@override_settings(MODO_SIMULACION=False)
+class NotaCreditoNoFiscalTests(NotaCreditoBase):
+    def setUp(self):
+        super().setUp()
+        self.crear_emisor()
+        self.factura = self.crear_comprobante('no_fiscal')
+        self.emitir(self.factura)
+
+    def test_anulacion_total(self):
+        nota = self.nota_de_credito(self.factura)
+        self.assertEqual(nota['clase'], 'nota_credito')
+        self.assertEqual(nota['estado'], 'borrador')
+        self.assertEqual(nota['asociado']['id'], self.factura['id'])
+        self.assertEqual(nota['asociado']['pendiente_de_acreditar'], '4000.00')
+        self.assertEqual(nota['total'], '4000.00')
+        self.assertEqual(len(nota['items']), 2)
+        self.assertIn('NF-00000001', nota['observaciones'])
+
+        emitida = self.emitir(nota)
+
+        self.assertEqual(emitida.status_code, 200, emitida.content)
+        # Numeración propia: no se mezcla con la de los comprobantes no fiscales.
+        self.assertEqual(emitida.data['numero_formateado'], 'NC-00000001')
+        self.assertEqual(emitida.data['nombre_tipo'], 'Nota de crédito no fiscal')
+        factura = self.ver(self.factura)
+        self.assertEqual(factura['pendiente_de_acreditar'], '0.00')
+        self.assertEqual(factura['notas_credito'][0]['numero_formateado'], 'NC-00000001')
+        # Ya no queda nada por anular.
+        self.assertIn('anulada por completo', self.nota_de_credito(self.factura, 422)['detail'])
+
+    def test_anulacion_parcial_no_puede_pasarse_del_total(self):
+        primera = self.cambiar_items(self.nota_de_credito(self.factura), '1000')
+        self.assertEqual(self.emitir(primera).status_code, 200)
+        self.assertEqual(self.ver(self.factura)['pendiente_de_acreditar'], '3000.00')
+
+        segunda = self.nota_de_credito(self.factura)  # vuelve a copiar los ítems: $ 4000
+        respuesta = self.emitir(segunda)
+        self.assertEqual(respuesta.status_code, 422)
+        self.assertIn('$ 3.000,00', respuesta.data['detail'])
+
+        self.cambiar_items(segunda, '3000')
+        self.assertEqual(self.emitir(segunda).status_code, 200)
+        self.assertEqual(self.ver(self.factura)['pendiente_de_acreditar'], '0.00')
+
+    def test_pedirla_dos_veces_devuelve_el_mismo_borrador(self):
+        primera = self.nota_de_credito(self.factura)
+        segunda = self.nota_de_credito(self.factura)
+        self.assertEqual(primera['id'], segunda['id'])
+
+    def test_solo_de_facturas_emitidas(self):
+        borrador = self.crear_comprobante('no_fiscal')
+        self.assertIn('ya emitidos', self.nota_de_credito(borrador, 422)['detail'])
+
+        nota = self.nota_de_credito(self.factura)
+        self.emitir(nota)
+        self.assertIn('otra nota de crédito', self.nota_de_credito(nota, 422)['detail'])
+
+    def test_no_se_le_cambia_cliente_ni_modalidad(self):
+        otro = Cliente.objects.create(nombre='Otro')
+        nota = self.nota_de_credito(self.factura)
+        respuesta = self.api.patch(
+            f'/api/comprobantes/{nota["id"]}/',
+            {'cliente': otro.id, 'modalidad': 'arca', 'tipo_comprobante': 'A'},
+            format='json',
+        )
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        self.assertEqual(respuesta.data['cliente'], self.cliente.id)
+        self.assertEqual(respuesta.data['modalidad'], 'no_fiscal')
+
+    def test_fecha_no_puede_ser_anterior_a_la_factura(self):
+        nota = self.nota_de_credito(self.factura)
+        self.api.patch(f'/api/comprobantes/{nota["id"]}/', {'fecha': '2026-10-01'}, format='json')
+        respuesta = self.emitir(nota)
+        self.assertEqual(respuesta.status_code, 422)
+        self.assertIn('anterior', respuesta.data['detail'])
+
+    def test_pdf_indica_que_factura_anula(self):
+        nota = self.nota_de_credito(self.factura)
+        self.emitir(nota)
+        respuesta = self.api.get(f'/api/comprobantes/{nota["id"]}/pdf/')
+        self.assertTrue(respuesta.content.startswith(b'%PDF'))
+
+        # El PDF se arma con esta plantilla: se revisa el texto antes de convertirlo.
+        html = render_to_string(
+            'facturacion/comprobante_pdf.html',
+            {'comprobante': Comprobante.objects.get(pk=nota['id']), 'emisor': Emisor.objects.get()},
+        )
+        self.assertIn('Anula:</strong> Comprobante no fiscal NF-00000001', html)
+
+
+@override_settings(MODO_SIMULACION=True)
+class NotaCreditoSimuladaTests(NotaCreditoBase):
+    def test_numeracion_propia_y_cae_simulado(self):
+        self.crear_emisor(condicion='IVA Responsable Inscripto')
+        factura = self.crear_comprobante('arca', tipo='A')
+        self.emitir(factura)
+        self.emitir(self.crear_comprobante('arca', tipo='A'))  # Factura A 0001-00000002
+
+        respuesta = self.emitir(self.nota_de_credito(factura))
+
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        self.assertEqual(respuesta.data['numero_formateado'], '0001-00000001')
+        self.assertEqual(respuesta.data['nombre_tipo'], 'Nota de crédito A')
+        self.assertTrue(respuesta.data['simulado'])
+        self.assertTrue(respuesta.data['cae'].startswith('99'))
+
+    def test_factura_real_no_se_anula_en_simulacion(self):
+        self.crear_emisor(con_punto_de_venta=True)
+        factura = self.crear_comprobante('arca')
+        with override_settings(MODO_SIMULACION=False), mock.patch.object(
+            afip.Receipt, 'validate', validar_aprobado
+        ):
+            self.emitir(factura)
+
+        respuesta = self.emitir(self.nota_de_credito(factura))
+
+        self.assertEqual(respuesta.status_code, 422)
+        self.assertIn('desactivá el modo simulación', respuesta.data['detail'])
+
+
+@override_settings(MODO_SIMULACION=False)
+class NotaCreditoArcaRealTests(NotaCreditoBase):
+    def test_informa_a_arca_la_factura_que_anula(self):
+        self.crear_emisor(con_punto_de_venta=True)
+        factura = self.crear_comprobante('arca')
+        with mock.patch.object(afip.Receipt, 'validate', validar_aprobado):
+            self.emitir(factura)
+            respuesta = self.emitir(self.nota_de_credito(factura))
+
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        self.assertEqual(respuesta.data['cae'], '70123456789012')
+        nota = Comprobante.objects.get(pk=respuesta.data['id'])
+        self.assertEqual(nota.receipt.receipt_type.code, '13')
+        self.assertEqual(
+            list(nota.receipt.related_receipts.all()), [Comprobante.objects.get(pk=factura['id']).receipt]
+        )
+
+
+@override_settings(MODO_SIMULACION=False)
+class DuplicarTests(NotaCreditoBase):
+    def test_crea_un_borrador_igual_con_fecha_de_hoy(self):
+        self.crear_emisor()
+        original = self.crear_comprobante('no_fiscal')
+        self.emitir(original)
+
+        respuesta = self.api.post(f'/api/comprobantes/{original["id"]}/duplicar/')
+
+        self.assertEqual(respuesta.status_code, 201, respuesta.content)
+        copia = respuesta.data
+        self.assertNotEqual(copia['id'], original['id'])
+        self.assertEqual(copia['estado'], 'borrador')
+        self.assertEqual(copia['numero_formateado'], '')
+        self.assertEqual(copia['fecha'], date.today().isoformat())
+        self.assertEqual(copia['total'], '4000.00')
+        self.assertEqual(
+            [i['descripcion'] for i in copia['items']], [i['descripcion'] for i in original['items']]
+        )
+        self.assertEqual(self.ver(original)['estado'], 'emitido')
+
+    def test_las_notas_de_credito_no_se_duplican(self):
+        self.crear_emisor()
+        factura = self.crear_comprobante('no_fiscal')
+        self.emitir(factura)
+        nota = self.nota_de_credito(factura)
+        respuesta = self.api.post(f'/api/comprobantes/{nota["id"]}/duplicar/')
+        self.assertEqual(respuesta.status_code, 422)
+
+
+@override_settings(MODO_SIMULACION=True)
+class FiltrosTests(BaseTest):
+    def setUp(self):
+        super().setUp()
+        self.crear_emisor(condicion='IVA Responsable Inscripto')
+        otro = Cliente.objects.create(nombre='Panadería Sol')
+        self.a = self.crear_comprobante('arca', tipo='A')
+        self.emitir(self.a)  # 0001-00000001
+        self.nf = self.crear_comprobante('no_fiscal')
+        Comprobante.objects.filter(pk=self.nf['id']).update(cliente=otro, fecha=date(2026, 11, 5))
+
+    def ids(self, **filtros):
+        respuesta = self.api.get('/api/comprobantes/', filtros)
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        return {c['id'] for c in respuesta.data['results']}
+
+    def test_por_estado_tipo_y_clase(self):
+        self.assertEqual(self.ids(estado='emitido'), {self.a['id']})
+        self.assertEqual(self.ids(estado='borrador'), {self.nf['id']})
+        self.assertEqual(self.ids(tipo='A'), {self.a['id']})
+        self.assertEqual(self.ids(tipo='no_fiscal'), {self.nf['id']})
+        self.assertEqual(self.ids(tipo='B'), set())
+        self.assertEqual(self.ids(clase='nota_credito'), set())
+
+    def test_buscar_por_cliente_o_numero(self):
+        self.assertEqual(self.ids(buscar='panader'), {self.nf['id']})
+        self.assertEqual(self.ids(buscar='0001-00000001'), {self.a['id']})
+        self.assertEqual(self.ids(buscar='nadie'), set())
+        Comprobante.objects.filter(pk=self.nf['id']).update(numero_interno=1)
+        # "NF-1" no debe traer la Factura A número 1, ni "0002-1" la del punto de venta 1.
+        self.assertEqual(self.ids(buscar='NF-1'), {self.nf['id']})
+        self.assertEqual(self.ids(buscar='nc-1'), set())
+        self.assertEqual(self.ids(buscar='0002-1'), set())
+        self.assertEqual(self.ids(buscar='1'), {self.a['id'], self.nf['id']})
+
+    def test_por_fechas(self):
+        self.assertEqual(self.ids(desde='2026-11-01'), {self.nf['id']})
+        self.assertEqual(self.ids(hasta='2026-10-31'), {self.a['id']})
+        self.assertEqual(self.api.get('/api/comprobantes/', {'desde': '2026-02-30'}).status_code, 400)
 
 
 class DocumentosTests(TestCase):

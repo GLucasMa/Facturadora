@@ -119,6 +119,7 @@ input:disabled, select:disabled, textarea:disabled { background: #f9fafb; color:
 .tabla th { text-align: left; padding: 10px 8px; border-bottom: 2px solid #e5e7eb; color: #4b5563; }
 .tabla td { padding: 10px 8px; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
 .tabla .der { text-align: right; }
+.tabla .sin-corte { white-space: nowrap; }
 
 .etiqueta {
   display: inline-block;
@@ -132,5 +133,18 @@ input:disabled, select:disabled, textarea:disabled { background: #f9fafb; color:
 .etiqueta-emitido { background: var(--exito-fondo); color: var(--exito-texto); }
 .etiqueta-arca { background: #dbeafe; color: #1e40af; }
 .etiqueta-no_fiscal { background: var(--aviso-fondo); color: var(--aviso-texto); }
+.etiqueta-nota_credito { background: #ede9fe; color: #5b21b6; }
+.etiqueta-anulada { background: var(--error-fondo); color: var(--error-texto); }
+
+.filtros {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+.filtros .campo-buscar { grid-column: span 2; }
+@media (max-width: 520px) {
+  .filtros .campo-buscar { grid-column: auto; }
+}
 
 .scroll-x { overflow-x: auto; }

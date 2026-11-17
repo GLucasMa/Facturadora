@@ -2,6 +2,7 @@ export type Modalidad = 'arca' | 'no_fiscal';
 export type TipoFactura = 'A' | 'B' | 'C';
 export type Concepto = 'productos' | 'servicios';
 export type EstadoComprobante = 'borrador' | 'emitido';
+export type Clase = 'factura' | 'nota_credito';
 
 export interface Pagina<T> {
   count: number;
@@ -27,11 +28,28 @@ export interface Item {
   subtotal?: string;
 }
 
+/** Comprobante relacionado (la factura de una nota de crédito, o sus notas de crédito). */
+export interface ComprobanteResumen {
+  id: number;
+  nombre_tipo: string;
+  numero_formateado: string;
+  fecha: string;
+  estado: EstadoComprobante;
+  total: string;
+  pendiente_de_acreditar: string | null;
+}
+
 export interface Comprobante {
   id: number;
   cliente: number;
   cliente_nombre: string;
   modalidad: Modalidad;
+  clase: Clase;
+  nombre_tipo: string;
+  asociado: ComprobanteResumen | null;
+  notas_credito: ComprobanteResumen[];
+  /** Solo facturas emitidas: cuánto falta anular con notas de crédito. */
+  pendiente_de_acreditar: string | null;
   tipo_comprobante: TipoFactura;
   concepto: Concepto;
   fecha: string;
@@ -90,3 +108,22 @@ export const CONDICIONES_IVA_EMISOR = [
 ];
 
 export const TIPOS_FACTURA: TipoFactura[] = ['A', 'B', 'C'];
+
+/** Filtros del listado de comprobantes (los vacíos no se envían). */
+export interface FiltrosComprobantes {
+  buscar: string;
+  estado: '' | EstadoComprobante;
+  tipo: '' | TipoFactura | 'no_fiscal';
+  clase: '' | Clase;
+  desde: string;
+  hasta: string;
+}
+
+export const FILTROS_VACIOS: FiltrosComprobantes = {
+  buscar: '',
+  estado: '',
+  tipo: '',
+  clase: '',
+  desde: '',
+  hasta: ''
+};

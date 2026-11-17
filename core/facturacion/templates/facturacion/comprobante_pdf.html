@@ -36,6 +36,9 @@
       <div><strong>N°:</strong> {{ comprobante.numero_formateado }}</div>
       <div><strong>Fecha:</strong> {{ comprobante.fecha|date:"d/m/Y" }}</div>
       <div><strong>Condición de venta:</strong> {{ comprobante.condicion_venta }}</div>
+      {% if comprobante.comprobante_asociado %}
+      <div><strong>Anula:</strong> {{ comprobante.comprobante_asociado.nombre_tipo }} {{ comprobante.comprobante_asociado.numero_formateado }} del {{ comprobante.comprobante_asociado.fecha|date:"d/m/Y" }}</div>
+      {% endif %}
       {% if comprobante.cae %}
       <div><strong>CAE:</strong> {{ comprobante.cae }}</div>
       <div><strong>Vto. CAE:</strong> {{ comprobante.cae_vencimiento|date:"d/m/Y" }}</div>

@@ -71,6 +71,12 @@ En modo simulación, si todavía no hay datos del negocio, se crea sola la **Emp
 
 Los comprobantes no fiscales y las facturas simuladas funcionan sin más configuración. Para facturar en ARCA de verdad falta el paso siguiente.
 
+### Anular, duplicar y buscar
+
+- **Anular con nota de crédito**: desde una factura emitida. Se arma un borrador con los mismos ítems (anulación total); bajando cantidades o quitando líneas queda parcial. No deja anular más de lo que falta. Tiene numeración propia (en no fiscales, `NC-00000001`). La nota de crédito de una factura simulada también es simulada; con ARCA real se informa la factura anulada (por ahora solo Nota de Crédito C).
+- **Duplicar**: crea un borrador nuevo con los mismos datos e ítems y fecha de hoy.
+- **Filtros**: el listado de comprobantes se filtra por cliente o número (`12`, `0001-00000012`, `NF-12`), estado, tipo, clase y fechas. Clientes tiene un buscador.
+
 ## Habilitar facturación electrónica en ARCA
 
 Se hace una vez en el admin (`/admin`). **Empezá siempre en homologación** (entorno de pruebas de ARCA).
@@ -88,7 +94,7 @@ Para pasar a producción: repetir con un Contribuyente con "is sandboxed" destil
 
 - Facturas **A y B con ARCA real**: hoy se pueden emitir en simulación, pero falta discriminar el IVA por alícuota (importes, `Vat` en django-afip).
 - **Multicomercio (SaaS)**: hoy hay una sola empresa (*Mi negocio*). Falta asociar clientes y comprobantes a una empresa y a usuarios.
-- Notas de crédito/débito y anulaciones.
+- Notas de débito. Notas de crédito A y B con ARCA real (dependen de discriminar el IVA).
 - Login de usuarios (hoy la API no tiene autenticación: **no publicar en internet** hasta tenerlo, aunque la configuración ya esté lista).
 - Cambiar la contraseña del usuario `admin` de desarrollo.
 - Envío del PDF por email al cliente.
